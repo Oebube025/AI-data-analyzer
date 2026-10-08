@@ -442,23 +442,33 @@ def main():
         if not api_key:
             st.error("🔑 API Key Missing: Please configure `GEMINI_API_KEY` in Streamlit Secrets or Environment Variables before running AI reports.")
         else:
+            # Guaranteed fallback list of active models
+            default_models = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro"]
+            
             try:
                 client = genai.Client(api_key=api_key)
-                available_models = [m.name.replace("models/", "") for m in client.models.list() if "generateContent" in getattr(m, "supported_generation_methods", [])]
+                fetched_models = [
+                    m.name.replace("models/", "") 
+                    for m in client.models.list() 
+                    if hasattr(m, "supported_generation_methods") and "generateContent" in (m.supported_generation_methods or [])
+                ]
+                available_models = fetched_models if fetched_models else default_models
             except Exception:
-                available_models = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro"]
+                available_models = default_models
 
             selected_model = st.selectbox("Select Gemini Model", available_models)
 
             if st.button("🚀 Generate Executive AI Briefing", type="primary"):
-                with st.spinner("Analyzing operational records with Gemini AI..."):
-                    try:
-                        briefing_md = engine.generate_ai_briefing(api_key=api_key, selected_model=selected_model)
-                        st.session_state["ai_briefing"] = briefing_md
-                        st.success("Executive Briefing generated successfully!")
-                    except Exception as err:
-                        st.error(f"Failed to generate briefing: {err}")
-
+                if not selected_model:
+                    st.error("Please select a valid model.")
+                else:
+                    with st.spinner("Analyzing operational records with Gemini AI..."):
+                        try:
+                            briefing_md = engine.generate_ai_briefing(api_key=api_key, selected_model=selected_model)
+                            st.session_state["ai_briefing"] = briefing_md
+                            st.success("Executive Briefing generated successfully!")
+                        except Exception as err:
+                            st.error(f"Failed to generate briefing: {err}")
         if "ai_briefing" in st.session_state:
             st.markdown("---")
             st.markdown(st.session_state["ai_briefing"])
