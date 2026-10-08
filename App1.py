@@ -206,6 +206,7 @@ class BusinessDataEngine:
                 })
         return pd.DataFrame(rows)
 
+    # Standard Generation for One-Click Executive Briefings
     def generate_ai_briefing(self, api_key: str, selected_model: str) -> str:
         client = genai.Client(api_key=api_key)
 
@@ -246,6 +247,37 @@ You are an elite C-suite Strategy Consultant & Senior Data Architect. Review the
             config=types.GenerateContentConfig(temperature=0.3)
         )
         return response.text
+
+    # Interactions API for Interactive Follow-up Questions & Custom Queries
+    def ask_data_assistant(self, api_key: str, selected_model: str, user_query: str) -> str:
+        client = genai.Client(api_key=api_key)
+
+        metrics = self.executive_metrics()
+        context_prompt = f"""
+Dataset Context:
+- Summary Metrics: {metrics}
+- Numerical Fields: {self.num_cols}
+- Categorical Fields: {self.cat_cols}
+- Focus Field: {self.target_column if self.target_column else "None"}
+
+User Question: {user_query}
+
+Provide a clear, direct, executive-level answer based strictly on the provided context.
+"""
+        try:
+            interaction = client.interactions.create(
+                model=selected_model,
+                input=context_prompt
+            )
+            return interaction.output_text
+        except Exception:
+            # Fallback to generate_content if Interactions API endpoint is restricted on key
+            response = client.models.generate_content(
+                model=selected_model,
+                contents=context_prompt,
+                config=types.GenerateContentConfig(temperature=0.3)
+            )
+            return response.text
 
 
 # ----------------------------------------------------------------------
@@ -432,17 +464,16 @@ def main():
                 st.plotly_chart(px.bar(counts, x=target, y="Count", title=f"Class Volume: {target}", template="plotly_dark"))
         tab_offset += 1
 
-    # ---- FINAL TAB: AI EXECUTIVE BRIEFING ----
+    # ---- FINAL TAB: AI EXECUTIVE BRIEFING & DATA ASSISTANT ----
     with tab_objs[tab_offset]:
-        st.subheader("🤖 AI Executive Business Briefing")
-        st.caption("Generate an automated strategic briefing tailored for executive leadership.")
+        st.subheader("🤖 AI Executive Business Briefing & Data Assistant")
+        st.caption("Generate an automated strategic briefing and ask custom follow-up questions about your data.")
 
         api_key = get_gemini_api_key()
 
         if not api_key:
             st.error("🔑 API Key Missing: Please configure `GEMINI_API_KEY` in Streamlit Secrets or Environment Variables before running AI reports.")
         else:
-            # Active Gemini models list
             default_models = ["gemini-2.5-flash", "gemini-1.5-flash", "gemini-2.5-pro", "gemini-1.5-pro"]
             
             try:
@@ -470,6 +501,7 @@ def main():
                         except Exception as err:
                             st.error(f"Failed to generate briefing: {err}")
 
+        # Display Report & Download Option
         if "ai_briefing" in st.session_state:
             st.markdown("---")
             st.markdown(st.session_state["ai_briefing"])
@@ -479,6 +511,29 @@ def main():
                 file_name="Executive_Data_Briefing.md",
                 mime="text/markdown"
             )
+
+        # Interactive Follow-up Question Assistant Section
+        if api_key:
+            st.markdown("---")
+            st.subheader("💬 Ask Follow-up Questions About Your Data")
+            st.caption("Type a custom question to get AI-powered insights about your uploaded dataset.")
+
+            user_query = st.text_input("Enter your query (e.g., 'What are the biggest operational risks in this file?')")
+            if st.button("💬 Ask Data Assistant"):
+                if user_query.strip():
+                    with st.spinner("Consulting Gemini AI Data Assistant..."):
+                        try:
+                            answer = engine.ask_data_assistant(
+                                api_key=api_key,
+                                selected_model=selected_model,
+                                user_query=user_query
+                            )
+                            st.session_state["last_answer"] = answer
+                        except Exception as err:
+                            st.error(f"Failed to query assistant: {err}")
+
+            if "last_answer" in st.session_state:
+                st.info(f"**AI Response:**\n\n{st.session_state['last_answer']}")
 
 
 if __name__ == "__main__":
