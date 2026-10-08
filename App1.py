@@ -442,8 +442,8 @@ def main():
         if not api_key:
             st.error("🔑 API Key Missing: Please configure `GEMINI_API_KEY` in Streamlit Secrets or Environment Variables before running AI reports.")
         else:
-            # Guaranteed fallback list of active models
-            default_models = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro"]
+            # Active Gemini models list
+            default_models = ["gemini-2.5-flash", "gemini-1.5-flash", "gemini-2.5-pro", "gemini-1.5-pro"]
             
             try:
                 client = genai.Client(api_key=api_key)
@@ -469,6 +469,7 @@ def main():
                             st.success("Executive Briefing generated successfully!")
                         except Exception as err:
                             st.error(f"Failed to generate briefing: {err}")
+
         if "ai_briefing" in st.session_state:
             st.markdown("---")
             st.markdown(st.session_state["ai_briefing"])
