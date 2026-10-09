@@ -2,7 +2,6 @@ streamlit
 pandas
 numpy
 plotly
-google-genai
-xlsxwriter
 openpyxl
-pyarrow
+xlsxwriter
+cohere
