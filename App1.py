@@ -1,6 +1,6 @@
 """
 Universal Data Analyzer & Business AI Assistant
-Production-ready dashboard built for business owners & clients.
+Production-ready dashboard powered by Cohere Command models.
 To run locally: streamlit run App1.py
 """
 
@@ -10,49 +10,43 @@ import numpy as np
 import pandas as pd
 import plotly.express as px
 import streamlit as st
-from google import genai
-from google.genai import types
+import cohere
 
 # ----------------------------------------------------------------------
-# Page Configuration & Matching Dark Executive Theme Styling
+# Page Configuration & Executive Dark Theme Styling
 # ----------------------------------------------------------------------
 st.set_page_config(
-    page_title="Executive Data Intelligence Suite",
+    page_title="Executive Data Intelligence Suite (Cohere AI)",
     page_icon="💼",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# Secure API Key Retrieval (Streamlit Secrets -> Environment Variables)
-def get_gemini_api_key() -> str:
-    """Retrieves Gemini API key safely without crashing on secrets TOML errors."""
-    if os.getenv("GEMINI_API_KEY"):
-        return os.getenv("GEMINI_API_KEY")
+# Secure API Key Retrieval
+def get_cohere_api_key() -> str:
+    """Retrieves Cohere API key safely from environment or Streamlit secrets."""
+    if os.getenv("COHERE_API_KEY"):
+        return os.getenv("COHERE_API_KEY")
     
     try:
-        if "GEMINI_API_KEY" in st.secrets:
-            return st.secrets["GEMINI_API_KEY"]
+        if "COHERE_API_KEY" in st.secrets:
+            return st.secrets["COHERE_API_KEY"]
     except Exception:
         pass
 
     return ""
 
-# Matching Dark Slate & Cyan Executive Styling
+# Matching Slate & Cyan Dark Styling
 st.markdown("""
     <style>
-    /* Main Background & Clean Typography */
     .stApp {
         background-color: #0f172a !important;
         color: #f8fafc !important;
     }
-    
-    /* Sidebar Background */
     section[data-testid="stSidebar"] {
         background-color: #1e293b !important;
         border-right: 1px solid #334155 !important;
     }
-
-    /* Executive Metric Card Styling */
     div[data-testid="stMetric"] {
         background-color: #1e293b !important;
         border: 1px solid #334155 !important;
@@ -71,8 +65,6 @@ st.markdown("""
         color: #38bdf8 !important;
         font-weight: 700 !important;
     }
-
-    /* Tab Styling */
     button[data-baseweb="tab"] {
         color: #94a3b8 !important;
         font-weight: 600 !important;
@@ -83,8 +75,6 @@ st.markdown("""
         color: #38bdf8 !important;
         border-bottom-color: #38bdf8 !important;
     }
-    
-    /* Primary Button Polish */
     .stButton>button[kind="primary"] {
         background-color: #0284c7 !important;
         color: #ffffff !important;
@@ -93,12 +83,9 @@ st.markdown("""
         padding: 10px 24px !important;
         font-weight: 600 !important;
     }
-    
     .stButton>button[kind="primary"]:hover {
         background-color: #0369a1 !important;
     }
-
-    /* Download Buttons & secondary buttons */
     .stDownloadButton>button {
         background-color: #334155 !important;
         color: #f8fafc !important;
@@ -114,7 +101,7 @@ st.markdown("""
 
 
 # ----------------------------------------------------------------------
-# Data Loading Engine
+# Data Processing Engine
 # ----------------------------------------------------------------------
 @st.cache_data(show_spinner="Processing business records...")
 def load_data(file_bytes: bytes, file_name: str, sheet_name=None) -> pd.DataFrame:
@@ -139,7 +126,7 @@ def list_sheets(file_bytes: bytes):
 
 
 # ----------------------------------------------------------------------
-# Business Data Intelligence Engine
+# Business Data Engine with Cohere Integration
 # ----------------------------------------------------------------------
 class BusinessDataEngine:
     def __init__(self, df: pd.DataFrame, target_column=None):
@@ -206,9 +193,12 @@ class BusinessDataEngine:
                 })
         return pd.DataFrame(rows)
 
-    # Standard Generation for One-Click Executive Briefings
-    def generate_ai_briefing(self, api_key: str, selected_model: str) -> str:
-        client = genai.Client(api_key=api_key)
+    # ------------------------------------------------------------------
+    # Cohere AI Generation Engine
+    # ------------------------------------------------------------------
+    def generate_cohere_briefing(self, api_key: str, selected_model: str) -> str:
+        """Generates an Executive Business Briefing using Cohere's Chat API."""
+        co = cohere.ClientV2(api_key=api_key)
 
         metrics = self.executive_metrics()
         missing = self.missing_summary().to_dict(orient="index") if not self.missing_summary().empty else "None"
@@ -241,16 +231,16 @@ You are an elite C-suite Strategy Consultant & Senior Data Architect. Review the
 3. **Core Performance Insights**: Key trends, averages, or distribution highlights business leaders must know.
 4. **Actionable Recommendations**: 3 to 4 prioritized strategic steps for business execution.
 """
-        response = client.models.generate_content(
+        response = co.chat(
             model=selected_model,
-            contents=prompt,
-            config=types.GenerateContentConfig(temperature=0.3)
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.3
         )
-        return response.text
+        return response.message.content[0].text
 
-    # Interactions API for Interactive Follow-up Questions & Custom Queries
-    def ask_data_assistant(self, api_key: str, selected_model: str, user_query: str) -> str:
-        client = genai.Client(api_key=api_key)
+    def ask_cohere_assistant(self, api_key: str, selected_model: str, user_query: str) -> str:
+        """Handles conversational Q&A using Cohere's Command models."""
+        co = cohere.ClientV2(api_key=api_key)
 
         metrics = self.executive_metrics()
         context_prompt = f"""
@@ -258,26 +248,18 @@ Dataset Context:
 - Summary Metrics: {metrics}
 - Numerical Fields: {self.num_cols}
 - Categorical Fields: {self.cat_cols}
-- Focus Field: {self.target_column if self.target_column else "None"}
+- Target KPI: {self.target_column if self.target_column else "None"}
 
 User Question: {user_query}
 
-Provide a clear, direct, executive-level answer based strictly on the provided context.
+Provide a direct, concise executive answer based strictly on the provided context.
 """
-        try:
-            interaction = client.interactions.create(
-                model=selected_model,
-                input=context_prompt
-            )
-            return interaction.output_text
-        except Exception:
-            # Fallback to generate_content if Interactions API endpoint is restricted on key
-            response = client.models.generate_content(
-                model=selected_model,
-                contents=context_prompt,
-                config=types.GenerateContentConfig(temperature=0.3)
-            )
-            return response.text
+        response = co.chat(
+            model=selected_model,
+            messages=[{"role": "user", "content": context_prompt}],
+            temperature=0.3
+        )
+        return response.message.content[0].text
 
 
 # ----------------------------------------------------------------------
@@ -285,7 +267,7 @@ Provide a clear, direct, executive-level answer based strictly on the provided c
 # ----------------------------------------------------------------------
 def main():
     st.title("💼 Executive Data Intelligence Suite")
-    st.caption("Upload company records, generate automated data audits, and unlock instant AI business insights.")
+    st.caption("Powered by Cohere Enterprise AI Models (Command R+ & Command R)")
     st.markdown("---")
 
     uploaded = st.file_uploader("📂 Upload Business Files (.csv or .xlsx)", type=["csv", "xlsx", "xls", "parquet"])
@@ -305,6 +287,8 @@ def main():
         try:
             st.session_state["current_df"] = load_data(file_bytes, uploaded.name, sheet)
             st.session_state["file_name"] = uploaded.name
+            st.session_state.pop("ai_briefing", None)
+            st.session_state.pop("last_answer", None)
         except Exception as e:
             st.error(f"Error loading business file: {e}")
             return
@@ -327,6 +311,8 @@ def main():
         
         if st.button("🔄 Reset Data Transformations", use_container_width=True):
             st.session_state["current_df"] = load_data(file_bytes, uploaded.name, sheet)
+            st.session_state.pop("ai_briefing", None)
+            st.session_state.pop("last_answer", None)
             st.rerun()
 
     engine = BusinessDataEngine(df, target)
@@ -334,7 +320,7 @@ def main():
     tabs = ["📈 Executive Dashboard", "🧹 Data Refinement", "📊 Metric Visualizations", "⚠️ Anomaly Audit"]
     if target:
         tabs.append("🎯 Key Metric Drilldown")
-    tabs.append("🤖 AI Executive Briefing")
+    tabs.append("🤖 AI Executive Briefing (Cohere)")
 
     tab_objs = st.tabs(tabs)
 
@@ -375,10 +361,7 @@ def main():
                     if strategy == "Remove empty rows":
                         st.session_state["current_df"] = df.dropna(subset=[col_to_fix])
                     elif strategy == "Fill with Field Average":
-                        if pd.api.types.is_numeric_dtype(df[col_to_fix]):
-                            fill_val = df[col_to_fix].mean()
-                        else:
-                            fill_val = df[col_to_fix].mode()[0]
+                        fill_val = df[col_to_fix].mean() if pd.api.types.is_numeric_dtype(df[col_to_fix]) else df[col_to_fix].mode()[0]
                         st.session_state["current_df"][col_to_fix] = st.session_state["current_df"][col_to_fix].fillna(fill_val)
                     elif strategy == "Set to Zero":
                         st.session_state["current_df"][col_to_fix] = st.session_state["current_df"][col_to_fix].fillna(0)
@@ -393,11 +376,10 @@ def main():
             st.markdown("##### 2. Deduplication & Column Removal")
             dup_count = df.duplicated().sum()
             st.write(f"Duplicate Entries Identified: **{dup_count}**")
-            if dup_count > 0:
-                if st.button("Remove Duplicate Entries"):
-                    st.session_state["current_df"] = df.drop_duplicates()
-                    st.success("Duplicates purged!")
-                    st.rerun()
+            if dup_count > 0 and st.button("Remove Duplicate Entries"):
+                st.session_state["current_df"] = df.drop_duplicates()
+                st.success("Duplicates purged!")
+                st.rerun()
 
             remove_cols = st.multiselect("Select Fields to Exclude", list(df.columns))
             if remove_cols and st.button("Remove Selected Fields"):
@@ -464,76 +446,67 @@ def main():
                 st.plotly_chart(px.bar(counts, x=target, y="Count", title=f"Class Volume: {target}", template="plotly_dark"))
         tab_offset += 1
 
-    # ---- FINAL TAB: AI EXECUTIVE BRIEFING & DATA ASSISTANT ----
+    # ---- FINAL TAB: COHERE AI EXECUTIVE BRIEFING ----
     with tab_objs[tab_offset]:
-        st.subheader("🤖 AI Executive Business Briefing & Data Assistant")
-        st.caption("Generate an automated strategic briefing and ask custom follow-up questions about your data.")
+        st.subheader("🤖 AI Executive Briefing & Data Assistant (Cohere)")
+        st.caption("Powered by Cohere Command models for fast enterprise analytical reporting.")
 
-        api_key = get_gemini_api_key()
+        cohere_api_key = get_cohere_api_key()
 
-        if not api_key:
-            st.error("🔑 API Key Missing: Please configure `GEMINI_API_KEY` in Streamlit Secrets or Environment Variables before running AI reports.")
-        else:
-            default_models = ["gemini-2.5-flash", "gemini-1.5-flash", "gemini-2.5-pro", "gemini-1.5-pro"]
-            
-            try:
-                client = genai.Client(api_key=api_key)
-                fetched_models = [
-                    m.name.replace("models/", "") 
-                    for m in client.models.list() 
-                    if hasattr(m, "supported_generation_methods") and "generateContent" in (m.supported_generation_methods or [])
-                ]
-                available_models = fetched_models if fetched_models else default_models
-            except Exception:
-                available_models = default_models
+        if not cohere_api_key:
+            st.error("🔑 Cohere API Key Missing: Please configure `COHERE_API_KEY` in Streamlit Secrets or Environment Variables.")
+            cohere_api_key = st.text_input("Or enter your Cohere API Key manually:", type="password")
 
-            selected_model = st.selectbox("Select Gemini Model", available_models)
+        if cohere_api_key:
+            cohere_models = [
+                "command-r-plus",
+                "command-r",
+                "command-light"
+            ]
+            selected_model = st.selectbox("Select Cohere Model", cohere_models)
 
-            if st.button("🚀 Generate Executive AI Briefing", type="primary"):
-                if not selected_model:
-                    st.error("Please select a valid model.")
-                else:
-                    with st.spinner("Analyzing operational records with Gemini AI..."):
-                        try:
-                            briefing_md = engine.generate_ai_briefing(api_key=api_key, selected_model=selected_model)
-                            st.session_state["ai_briefing"] = briefing_md
-                            st.success("Executive Briefing generated successfully!")
-                        except Exception as err:
-                            st.error(f"Failed to generate briefing: {err}")
+            if st.button("🚀 Generate Executive Briefing with Cohere", type="primary"):
+                with st.spinner("Analyzing operational records with Cohere Command AI..."):
+                    try:
+                        briefing_md = engine.generate_cohere_briefing(api_key=cohere_api_key, selected_model=selected_model)
+                        st.session_state["ai_briefing"] = briefing_md
+                        st.success("Briefing generated successfully with Cohere!")
+                    except Exception as err:
+                        st.error(f"Cohere Generation Error: {err}")
 
-        # Display Report & Download Option
+        # Display Cohere Report
         if "ai_briefing" in st.session_state:
             st.markdown("---")
             st.markdown(st.session_state["ai_briefing"])
             st.download_button(
                 label="📄 Download Executive Briefing (.md)",
                 data=st.session_state["ai_briefing"],
-                file_name="Executive_Data_Briefing.md",
+                file_name="Cohere_Executive_Briefing.md",
                 mime="text/markdown"
             )
 
-        # Interactive Follow-up Question Assistant Section
-        if api_key:
+        # Cohere Q&A Assistant
+        if cohere_api_key:
             st.markdown("---")
-            st.subheader("💬 Ask Follow-up Questions About Your Data")
-            st.caption("Type a custom question to get AI-powered insights about your uploaded dataset.")
+            st.subheader("💬 Ask Cohere Data Assistant Follow-up Questions")
+            st.caption("Ask specific business questions regarding the dataset profile.")
 
-            user_query = st.text_input("Enter your query (e.g., 'What are the biggest operational risks in this file?')")
-            if st.button("💬 Ask Data Assistant"):
+            user_query = st.text_input("Enter your query (e.g., 'What are the main risks in this dataset?')")
+            if st.button("💬 Ask Cohere Assistant"):
                 if user_query.strip():
-                    with st.spinner("Consulting Gemini AI Data Assistant..."):
+                    with st.spinner("Consulting Cohere Data Assistant..."):
                         try:
-                            answer = engine.ask_data_assistant(
-                                api_key=api_key,
+                            answer = engine.ask_cohere_assistant(
+                                api_key=cohere_api_key,
                                 selected_model=selected_model,
                                 user_query=user_query
                             )
                             st.session_state["last_answer"] = answer
                         except Exception as err:
-                            st.error(f"Failed to query assistant: {err}")
+                            st.error(f"Error querying Cohere assistant: {err}")
 
             if "last_answer" in st.session_state:
-                st.info(f"**AI Response:**\n\n{st.session_state['last_answer']}")
+                st.info(f"**Cohere AI Response:**\n\n{st.session_state['last_answer']}")
 
 
 if __name__ == "__main__":
