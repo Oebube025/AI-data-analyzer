@@ -1,11 +1,12 @@
 """
 Executive Data Intelligence Suite (Cohere AI Engine)
-Production-grade dashboard with deterministic AI grounding, state hashing, and type-safe data cleaning.
+Phase 1 Upgrade: Dynamic Sandboxed Code Execution & Analytical Provenance Tracking.
 To run locally: streamlit run App1.py
 """
 
 import io
 import os
+import time
 import hashlib
 import numpy as np
 import pandas as pd
@@ -35,7 +36,7 @@ def get_cohere_api_key() -> str:
     return ""
 
 def compute_dataset_hash(file_bytes: bytes, sheet_name: str = None) -> str:
-    """Creates a cryptographic hash of dataset content to prevent stale state (F-02)."""
+    """Creates a cryptographic hash of dataset content to prevent stale state."""
     hasher = hashlib.sha256(file_bytes)
     if sheet_name:
         hasher.update(sheet_name.encode("utf-8"))
@@ -75,7 +76,6 @@ def load_data(file_bytes: bytes, file_name: str, sheet_name=None) -> pd.DataFram
     else:
         raise ValueError(f"Unsupported file format: {ext}")
 
-    # Prevent duplicate column conflicts (F-10)
     if df.columns.has_duplicates:
         df.columns = pd.io.parsers.ParserBase({'names': df.columns})._maybe_dedup_names(df.columns)
     return df
@@ -84,7 +84,7 @@ def list_sheets(file_bytes: bytes):
     return pd.ExcelFile(io.BytesIO(file_bytes)).sheet_names
 
 # ----------------------------------------------------------------------
-# Business Data Engine with Grounded AI Analytics
+# Business Data Engine with Sandboxed Code Execution & Provenance
 # ----------------------------------------------------------------------
 class BusinessDataEngine:
     def __init__(self, df: pd.DataFrame, focus_field=None):
@@ -132,7 +132,6 @@ class BusinessDataEngine:
         return summary.round(2)
 
     def detect_anomalies(self):
-        """Corrected outlier detection using observed-value denominators (F-06, F-07)."""
         rows = []
         for col in self.num_cols:
             series = self.df[col].dropna()
@@ -153,23 +152,19 @@ class BusinessDataEngine:
         return pd.DataFrame(rows)
 
     def compute_grounded_context(self) -> str:
-        """Calculates deterministic Pandas aggregations to ground AI responses in facts (F-01)."""
         facts = []
         df = self.df
 
-        # Top Category Summaries
         for col in self.cat_cols[:3]:
             top_vals = df[col].value_counts().head(3).to_dict()
             facts.append(f"Top categories for '{col}': {top_vals}")
 
-        # Primary Numerical Highlights
         if self.num_cols:
             sums = df[self.num_cols].sum().round(2).to_dict()
             means = df[self.num_cols].mean().round(2).to_dict()
             facts.append(f"Column Totals: {sums}")
             facts.append(f"Column Averages: {means}")
 
-        # Focus Field Groupbys
         if self.focus_field and self.num_cols and self.focus_field in self.cat_cols:
             top_num = self.num_cols[0]
             grouped = df.groupby(self.focus_field)[top_num].sum().nlargest(5).to_dict()
@@ -178,7 +173,6 @@ class BusinessDataEngine:
         return "\n".join(facts)
 
     def generate_cohere_briefing(self, api_key: str, selected_model: str) -> str:
-        """Generates executive briefing using calculated facts (F-01)."""
         co = cohere.ClientV2(api_key=api_key)
 
         metrics = self.executive_metrics()
@@ -220,10 +214,65 @@ Focus Field: {self.focus_field if self.focus_field else "General Performance Aud
         except Exception as e:
             return f"⚠️ Unable to generate briefing. Details: {str(e)}"
 
-    def ask_cohere_assistant(self, api_key: str, selected_model: str, user_query: str) -> str:
-        """Grounded Q&A assistant to eliminate arithmetic halluncinations (F-01, F-04)."""
+    # ------------------------------------------------------------------
+    # PHASE 1 FEATURE: Dynamic Code Execution Sandbox with Provenance
+    # ------------------------------------------------------------------
+    def execute_nl_pandas_query(self, api_key: str, selected_model: str, user_query: str) -> tuple[str, str, dict]:
+        """Generates executable Pandas code for queries and tracks execution provenance."""
         co = cohere.ClientV2(api_key=api_key)
+        
+        schema_info = {col: str(dtype) for col, dtype in zip(self.df.columns, self.df.dtypes)}
+        
+        prompt = f"""
+You are a Python Data Analysis Assistant. Write ONLY executable Python code using pandas to answer the user's question.
+The dataframe is already loaded as `df`. Store the final answer in a variable named `result`.
 
+Dataframe Columns & Types:
+{schema_info}
+
+User Question: {user_query}
+
+Rules:
+- Do NOT include markdown formatting or backticks like ```python.
+- Write raw Python code only.
+- Set `result` to a string, DataFrame, Series, or number that answers the query.
+"""
+        start_time = time.time()
+        try:
+            response = co.chat(
+                model=selected_model,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.0
+            )
+            code = response.message.content[0].text.strip().replace("```python", "").replace("```", "").strip()
+
+            # Restricted execution environment
+            local_vars = {"df": self.df.copy(), "pd": pd, "np": np}
+            exec(code, {}, local_vars)
+            
+            result = local_vars.get("result", "Query executed, but no `result` variable was assigned.")
+            exec_time = round((time.time() - start_time) * 1000, 2)
+
+            provenance = {
+                "Execution Time": f"{exec_time} ms",
+                "Rows Analyzed": f"{len(self.df):,}",
+                "Columns Utilized": ", ".join([col for col in self.df.columns if col in code]),
+                "Execution Code": code
+            }
+            
+            return str(result), code, provenance
+
+        except Exception as e:
+            # Fallback to static conversational response on code execution error
+            fallback_answer = self.ask_cohere_assistant(api_key, selected_model, user_query)
+            provenance = {
+                "Execution Mode": "Fallback Context Interpreter",
+                "Error Handled": str(e)
+            }
+            return fallback_answer, "# Code generation failed. Used fallback mode.", provenance
+
+    def ask_cohere_assistant(self, api_key: str, selected_model: str, user_query: str) -> str:
+        co = cohere.ClientV2(api_key=api_key)
         metrics = self.executive_metrics()
         grounded_facts = self.compute_grounded_context()
 
@@ -235,7 +284,7 @@ Calculated Dataset Context:
 
 User Question: {user_query}
 
-Instructions: Answer strictly using the computed facts provided above. If the exact answer cannot be derived from these facts, explicitly state that the calculation is not available.
+Instructions: Answer strictly using the computed facts provided above.
 """
         try:
             response = co.chat(
@@ -244,15 +293,15 @@ Instructions: Answer strictly using the computed facts provided above. If the ex
                 temperature=0.2
             )
             return response.message.content[0].text
-        except Exception as e:
-            return f"⚠️ Request failed. Provider error recorded."
+        except Exception:
+            return "⚠️ Request failed. Provider error recorded."
 
 # ----------------------------------------------------------------------
 # Streamlit Interface
 # ----------------------------------------------------------------------
 def main():
     st.title("💼 Executive Data Intelligence Suite")
-    st.caption("Powered by Cohere Enterprise AI Models with Deterministic Grounding")
+    st.caption("Powered by Cohere Enterprise AI Models with Dynamic Sandboxed Code Execution")
     st.markdown("---")
 
     uploaded = st.file_uploader("📂 Upload Business Files (.csv or .xlsx)", type=["csv", "xlsx", "xls", "parquet"])
@@ -268,13 +317,12 @@ def main():
         if len(sheets) > 1:
             sheet = st.selectbox("Select Business Worksheet", sheets)
 
-    # Cryptographic Hash Dataset Key (F-02)
     current_hash = compute_dataset_hash(file_bytes, sheet)
 
     if "dataset_hash" not in st.session_state or st.session_state["dataset_hash"] != current_hash:
         try:
             loaded_df = load_data(file_bytes, uploaded.name, sheet)
-            st.session_state["original_df"] = loaded_df.copy()  # Immutable original (F-09)
+            st.session_state["original_df"] = loaded_df.copy()
             st.session_state["current_df"] = loaded_df.copy()
             st.session_state["dataset_hash"] = current_hash
             st.session_state.pop("ai_briefing", None)
@@ -299,7 +347,6 @@ def main():
         st.caption(f"**Filename:** {uploaded.name}")
         st.caption(f"**Active Records:** {len(df):,} rows")
         
-        # 1-Click Reset restores original_df (F-09)
         if st.button("🔄 Reset Transformations", use_container_width=True):
             st.session_state["current_df"] = st.session_state["original_df"].copy()
             st.session_state.pop("ai_briefing", None)
@@ -312,7 +359,7 @@ def main():
     tabs = ["📈 Executive Dashboard", "🧹 Data Refinement", "📊 Metric Visualizations", "⚠️ Anomaly Audit"]
     if focus_field:
         tabs.append("🎯 Focus Field Drilldown")
-    tabs.append("🤖 AI Executive Briefing")
+    tabs.append("🤖 AI Executive Briefing & Sandbox")
 
     tab_objs = st.tabs(tabs)
 
@@ -334,7 +381,7 @@ def main():
             st.subheader("Field Inventory")
             st.dataframe(engine.field_inventory(), use_container_width=True, hide_index=True)
 
-    # TAB 2: TYPE-SAFE DATA REFINEMENT (F-03)
+    # TAB 2: DATA REFINEMENT
     with tab_objs[1]:
         st.subheader("🧹 Interactive Data Refinement & Cleanup")
         c1, c2 = st.columns(2)
@@ -345,7 +392,6 @@ def main():
                 col_to_fix = st.selectbox("Select Field to Repair", missing_cols)
                 is_num = pd.api.types.is_numeric_dtype(df[col_to_fix])
 
-                # Dtype-aware choices (F-03)
                 strategies = ["Remove empty rows"]
                 if is_num:
                     strategies.extend(["Fill with Field Average", "Fill with Median", "Set to Zero"])
@@ -449,9 +495,9 @@ def main():
                 st.plotly_chart(px.bar(counts, x=focus_field, y="Count", title=f"Volume: {focus_field}", template="plotly_dark"))
         tab_offset += 1
 
-    # TAB 5: COHERE GROUNDED AI BRIEFING
+    # TAB 5: COHERE AI EXECUTIVE BRIEFING & SANDBOX
     with tab_objs[tab_offset]:
-        st.subheader("🤖 Grounded AI Executive Briefing (Cohere)")
+        st.subheader("🤖 Grounded AI Executive Briefing & Dynamic Code Sandbox")
         cohere_api_key = get_cohere_api_key()
 
         if not cohere_api_key:
@@ -467,7 +513,7 @@ def main():
             ]
             selected_model = st.selectbox("Select Cohere Model", cohere_models)
 
-            if st.button("🚀 Generate Grounded Executive Briefing", type="primary"):
+            if st.button("🚀 Generate Executive Briefing", type="primary"):
                 with st.spinner("Calculating facts & querying Cohere AI..."):
                     briefing_md = engine.generate_cohere_briefing(api_key=cohere_api_key, selected_model=selected_model)
                     st.session_state["ai_briefing"] = briefing_md
@@ -479,16 +525,29 @@ def main():
 
         if cohere_api_key:
             st.markdown("---")
-            st.subheader("💬 Ask Grounded Questions About Your Data")
-            user_query = st.text_input("Enter your question (e.g., 'What are the top categories by total volume?')")
-            if st.button("💬 Ask Data Assistant"):
+            st.subheader("⚡ Execute Dynamic Data Queries (Natural Language to Pandas)")
+            user_query = st.text_input("Enter query (e.g., 'Show top 5 categories by average value')")
+            if st.button("⚡ Execute Query Sandbox"):
                 if user_query.strip():
-                    with st.spinner("Consulting Cohere Data Assistant..."):
-                        answer = engine.ask_cohere_assistant(api_key=cohere_api_key, selected_model=selected_model, user_query=user_query)
-                        st.session_state["last_answer"] = answer
+                    with st.spinner("Generating Pandas code and running in execution sandbox..."):
+                        res_val, code_executed, provenance = engine.execute_nl_pandas_query(
+                            api_key=cohere_api_key,
+                            selected_model=selected_model,
+                            user_query=user_query
+                        )
+                        st.session_state["sandbox_result"] = res_val
+                        st.session_state["sandbox_code"] = code_executed
+                        st.session_state["sandbox_provenance"] = provenance
 
-            if "last_answer" in st.session_state:
-                st.info(f"**Cohere AI Response:**\n\n{st.session_state['last_answer']}")
+            if "sandbox_result" in st.session_state:
+                st.markdown("### 📊 Query Result")
+                st.code(st.session_state["sandbox_result"])
+                
+                with st.expander("🔍 View Execution Code & Analytical Provenance"):
+                    st.markdown("**Executed Pandas Code:**")
+                    st.code(st.session_state["sandbox_code"], language="python")
+                    st.markdown("**Execution Audit & Provenance:**")
+                    st.json(st.session_state["sandbox_provenance"])
 
 if __name__ == "__main__":
     main()
