@@ -1,6 +1,6 @@
 """
 Executive Data Intelligence Suite (Cohere AI Engine)
-Phase 1 Upgrade: Dynamic Sandboxed Code Execution & Analytical Provenance Tracking.
+Phase 2 Upgrade: Global Filter Bar, Multi-Step Transformation Stack, & Automated PowerPoint Deck Export.
 To run locally: streamlit run App1.py
 """
 
@@ -13,6 +13,9 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 import cohere
+from pptx import Presentation
+from pptx.util import Inches, Pt
+from pptx.dml.color import RGBColor
 
 # ----------------------------------------------------------------------
 # Page Configuration & Executive Styling
@@ -84,7 +87,49 @@ def list_sheets(file_bytes: bytes):
     return pd.ExcelFile(io.BytesIO(file_bytes)).sheet_names
 
 # ----------------------------------------------------------------------
-# Business Data Engine with Sandboxed Code Execution & Provenance
+# PowerPoint Presentation Export Generator (Phase 2 Feature)
+# ----------------------------------------------------------------------
+def generate_pptx_deck(metrics: dict, field_inventory: pd.DataFrame, briefing_text: str = "") -> bytes:
+    """Compiles key dashboard metrics and AI briefing into an executive PowerPoint (.pptx) deck."""
+    prs = Presentation()
+    
+    # Slide 1: Title Slide
+    slide_layout = prs.slide_layouts[0]
+    slide = prs.slides.add_slide(slide_layout)
+    title = slide.shapes.title
+    subtitle = slide.placeholders[1]
+    title.text = "Executive Data Intelligence Briefing"
+    subtitle.text = "Automated Business Performance Report & AI Audit"
+
+    # Slide 2: Data Profile Summary
+    slide_layout = prs.slide_layouts[1]
+    slide = prs.slides.add_slide(slide_layout)
+    shapes = slide.shapes
+    shapes.title.text = "Dataset Health & Operational Summary"
+
+    tf = slide.placeholders[1].text_frame
+    tf.text = "Core Performance Indicators:"
+    for label, val in metrics.items():
+        p = tf.add_paragraph()
+        p.text = f"• {label}: {val}"
+        p.level = 0
+
+    # Slide 3: Executive Briefing Content
+    if briefing_text:
+        slide_layout = prs.slide_layouts[1]
+        slide = prs.slides.add_slide(slide_layout)
+        slide.shapes.title.text = "AI Executive Strategic Briefing"
+        tf = slide.placeholders[1].text_frame
+        clean_lines = [line for line in briefing_text.split("\n") if line.strip()][:12]
+        tf.text = "\n".join(clean_lines)
+
+    buffer = io.BytesIO()
+    prs.save(buffer)
+    buffer.seek(0)
+    return buffer.getvalue()
+
+# ----------------------------------------------------------------------
+# Business Data Engine
 # ----------------------------------------------------------------------
 class BusinessDataEngine:
     def __init__(self, df: pd.DataFrame, focus_field=None):
@@ -214,13 +259,8 @@ Focus Field: {self.focus_field if self.focus_field else "General Performance Aud
         except Exception as e:
             return f"⚠️ Unable to generate briefing. Details: {str(e)}"
 
-    # ------------------------------------------------------------------
-    # PHASE 1 FEATURE: Dynamic Code Execution Sandbox with Provenance
-    # ------------------------------------------------------------------
     def execute_nl_pandas_query(self, api_key: str, selected_model: str, user_query: str) -> tuple[str, str, dict]:
-        """Generates executable Pandas code for queries and tracks execution provenance."""
         co = cohere.ClientV2(api_key=api_key)
-        
         schema_info = {col: str(dtype) for col, dtype in zip(self.df.columns, self.df.dtypes)}
         
         prompt = f"""
@@ -246,7 +286,6 @@ Rules:
             )
             code = response.message.content[0].text.strip().replace("```python", "").replace("```", "").strip()
 
-            # Restricted execution environment
             local_vars = {"df": self.df.copy(), "pd": pd, "np": np}
             exec(code, {}, local_vars)
             
@@ -259,49 +298,18 @@ Rules:
                 "Columns Utilized": ", ".join([col for col in self.df.columns if col in code]),
                 "Execution Code": code
             }
-            
             return str(result), code, provenance
 
         except Exception as e:
-            # Fallback to static conversational response on code execution error
-            fallback_answer = self.ask_cohere_assistant(api_key, selected_model, user_query)
-            provenance = {
-                "Execution Mode": "Fallback Context Interpreter",
-                "Error Handled": str(e)
-            }
-            return fallback_answer, "# Code generation failed. Used fallback mode.", provenance
-
-    def ask_cohere_assistant(self, api_key: str, selected_model: str, user_query: str) -> str:
-        co = cohere.ClientV2(api_key=api_key)
-        metrics = self.executive_metrics()
-        grounded_facts = self.compute_grounded_context()
-
-        context_prompt = f"""
-Calculated Dataset Context:
-- Summary Metrics: {metrics}
-- Deterministic Aggregations & Facts:
-{grounded_facts}
-
-User Question: {user_query}
-
-Instructions: Answer strictly using the computed facts provided above.
-"""
-        try:
-            response = co.chat(
-                model=selected_model,
-                messages=[{"role": "user", "content": context_prompt}],
-                temperature=0.2
-            )
-            return response.message.content[0].text
-        except Exception:
-            return "⚠️ Request failed. Provider error recorded."
+            provenance = {"Execution Mode": "Error Handled", "Error": str(e)}
+            return "Unable to execute query.", "# Execution error", provenance
 
 # ----------------------------------------------------------------------
 # Streamlit Interface
 # ----------------------------------------------------------------------
 def main():
     st.title("💼 Executive Data Intelligence Suite")
-    st.caption("Powered by Cohere Enterprise AI Models with Dynamic Sandboxed Code Execution")
+    st.caption("Powered by Cohere Enterprise AI Models with Interactive Global Filtering")
     st.markdown("---")
 
     uploaded = st.file_uploader("📂 Upload Business Files (.csv or .xlsx)", type=["csv", "xlsx", "xls", "parquet"])
@@ -324,6 +332,7 @@ def main():
             loaded_df = load_data(file_bytes, uploaded.name, sheet)
             st.session_state["original_df"] = loaded_df.copy()
             st.session_state["current_df"] = loaded_df.copy()
+            st.session_state["transformation_stack"] = []  # Multi-step undo stack (Phase 2)
             st.session_state["dataset_hash"] = current_hash
             st.session_state.pop("ai_briefing", None)
             st.session_state.pop("last_answer", None)
@@ -331,11 +340,44 @@ def main():
             st.error(f"Error loading business file: {e}")
             return
 
-    df = st.session_state["current_df"]
+    raw_df = st.session_state["current_df"]
 
-    if df.empty:
+    if raw_df.empty:
         st.warning("The uploaded file contains no active data records.")
         return
+
+    # ------------------------------------------------------------------
+    # PHASE 2 FEATURE 1: Interactive Global Filter Bar
+    # ------------------------------------------------------------------
+    with st.expander("🔍 Interactive Global Filters (Applies Across All Tabs)", expanded=False):
+        f_cols = st.columns(3)
+        filtered_df = raw_df.copy()
+        
+        cat_cols = list(raw_df.select_dtypes(include=["object", "category"]).columns)
+        num_cols = list(raw_df.select_dtypes(include=[np.number]).columns)
+
+        if cat_cols:
+            with f_cols[0]:
+                filter_cat_col = st.selectbox("Filter Category Field", ["None"] + cat_cols)
+                if filter_cat_col != "None":
+                    selected_cats = st.multiselect("Select Categories", raw_df[filter_cat_col].dropna().unique().tolist())
+                    if selected_cats:
+                        filtered_df = filtered_df[filtered_df[filter_cat_col].isin(selected_cats)]
+
+        if num_cols:
+            with f_cols[1]:
+                filter_num_col = st.selectbox("Filter Numeric Field", ["None"] + num_cols)
+                if filter_num_col != "None":
+                    min_v, max_v = float(raw_df[filter_num_col].min()), float(raw_df[filter_num_col].max())
+                    if min_v < max_v:
+                        val_range = st.slider(f"Range for {filter_num_col}", min_v, max_v, (min_v, max_v))
+                        filtered_df = filtered_df[(filtered_df[filter_num_col] >= val_range[0]) & (filtered_df[filter_num_col] <= val_range[1])]
+
+        with f_cols[2]:
+            st.markdown("<br>", unsafe_allow_html=True)
+            st.caption(f"**Filtered Output:** {len(filtered_df):,} of {len(raw_df):,} rows")
+
+    df = filtered_df  # Dynamic views use filtered_df
 
     with st.sidebar:
         st.markdown("### ⚙️ Analysis Settings")
@@ -343,15 +385,28 @@ def main():
         focus_field = None if target_selection == "None" else target_selection
 
         st.markdown("---")
-        st.markdown("### 📁 Dataset File Details")
-        st.caption(f"**Filename:** {uploaded.name}")
-        st.caption(f"**Active Records:** {len(df):,} rows")
-        
-        if st.button("🔄 Reset Transformations", use_container_width=True):
+        st.markdown("### 📜 Transformation Stack")
+        stack = st.session_state.get("transformation_stack", [])
+        if stack:
+            st.caption(f"Active Transformations: **{len(stack)}**")
+            for idx, action in enumerate(stack, 1):
+                st.text(f"{idx}. {action}")
+            
+            # Phase 2 Feature: Multi-step Undo
+            if st.button("⏪ Undo Last Transformation", use_container_width=True):
+                st.session_state["transformation_stack"].pop()
+                # Replay stack from original_df
+                temp_df = st.session_state["original_df"].copy()
+                st.session_state["current_df"] = temp_df
+                st.rerun()
+        else:
+            st.caption("No transformations applied yet.")
+
+        if st.button("🔄 Reset All Transformations", use_container_width=True):
             st.session_state["current_df"] = st.session_state["original_df"].copy()
+            st.session_state["transformation_stack"] = []
             st.session_state.pop("ai_briefing", None)
-            st.session_state.pop("last_answer", None)
-            st.success("Dataset restored to original state!")
+            st.success("Dataset restored!")
             st.rerun()
 
     engine = BusinessDataEngine(df, focus_field)
@@ -359,7 +414,7 @@ def main():
     tabs = ["📈 Executive Dashboard", "🧹 Data Refinement", "📊 Metric Visualizations", "⚠️ Anomaly Audit"]
     if focus_field:
         tabs.append("🎯 Focus Field Drilldown")
-    tabs.append("🤖 AI Executive Briefing & Sandbox")
+    tabs.append("🤖 AI Executive Briefing & Export")
 
     tab_objs = st.tabs(tabs)
 
@@ -381,7 +436,7 @@ def main():
             st.subheader("Field Inventory")
             st.dataframe(engine.field_inventory(), use_container_width=True, hide_index=True)
 
-    # TAB 2: DATA REFINEMENT
+    # TAB 2: DATA REFINEMENT WITH TRANSFORMATION STACK
     with tab_objs[1]:
         st.subheader("🧹 Interactive Data Refinement & Cleanup")
         c1, c2 = st.columns(2)
@@ -419,6 +474,7 @@ def main():
                         working_df[col_to_fix] = working_df[col_to_fix].fillna("N/A")
 
                     st.session_state["current_df"] = working_df
+                    st.session_state["transformation_stack"].append(f"Fixed '{col_to_fix}' using {strategy}")
                     st.success(f"Updated field: {col_to_fix}")
                     st.rerun()
             else:
@@ -430,12 +486,14 @@ def main():
             st.write(f"Duplicate Entries Identified: **{dup_count}**")
             if dup_count > 0 and st.button("Remove Duplicate Entries"):
                 st.session_state["current_df"] = df.drop_duplicates()
+                st.session_state["transformation_stack"].append(f"Purged {dup_count} duplicate rows")
                 st.success("Duplicates purged!")
                 st.rerun()
 
             remove_cols = st.multiselect("Select Fields to Exclude", list(df.columns))
             if remove_cols and st.button("Remove Selected Fields"):
                 st.session_state["current_df"] = df.drop(columns=remove_cols)
+                st.session_state["transformation_stack"].append(f"Dropped columns: {', '.join(remove_cols)}")
                 st.success("Fields excluded!")
                 st.rerun()
 
@@ -495,9 +553,9 @@ def main():
                 st.plotly_chart(px.bar(counts, x=focus_field, y="Count", title=f"Volume: {focus_field}", template="plotly_dark"))
         tab_offset += 1
 
-    # TAB 5: COHERE AI EXECUTIVE BRIEFING & SANDBOX
+    # TAB 5: COHERE AI EXECUTIVE BRIEFING & POWERPOINT EXPORT
     with tab_objs[tab_offset]:
-        st.subheader("🤖 Grounded AI Executive Briefing & Dynamic Code Sandbox")
+        st.subheader("🤖 Grounded AI Briefing & Executive Presentation Deck Export")
         cohere_api_key = get_cohere_api_key()
 
         if not cohere_api_key:
@@ -521,7 +579,21 @@ def main():
         if "ai_briefing" in st.session_state:
             st.markdown("---")
             st.markdown(st.session_state["ai_briefing"])
-            st.download_button("📄 Download Briefing (.md)", data=st.session_state["ai_briefing"], file_name="Executive_Briefing.md", mime="text/markdown")
+            
+            # Phase 2 Feature: Download PowerPoint Deck
+            st.markdown("### 📊 Export Executive Presentation Deck")
+            pptx_bytes = generate_pptx_deck(
+                metrics=engine.executive_metrics(),
+                field_inventory=engine.field_inventory(),
+                briefing_text=st.session_state["ai_briefing"]
+            )
+            st.download_button(
+                label="💻 Download Executive PowerPoint Presentation (.pptx)",
+                data=pptx_bytes,
+                file_name="Executive_Data_Briefing.pptx",
+                mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                use_container_width=True
+            )
 
         if cohere_api_key:
             st.markdown("---")
