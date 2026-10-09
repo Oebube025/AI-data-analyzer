@@ -1,6 +1,6 @@
 """
 Universal Data Analyzer & Business AI Assistant
-Production-ready dashboard powered by Cohere Command models.
+Production-ready dashboard powered by Cohere Enterprise AI Models.
 To run locally: streamlit run App1.py
 """
 
@@ -239,7 +239,7 @@ You are an elite C-suite Strategy Consultant & Senior Data Architect. Review the
         return response.message.content[0].text
 
     def ask_cohere_assistant(self, api_key: str, selected_model: str, user_query: str) -> str:
-        """Handles conversational Q&A using Cohere's Command models."""
+        """Handles conversational Q&A using Cohere models."""
         co = cohere.ClientV2(api_key=api_key)
 
         metrics = self.executive_metrics()
@@ -267,7 +267,7 @@ Provide a direct, concise executive answer based strictly on the provided contex
 # ----------------------------------------------------------------------
 def main():
     st.title("💼 Executive Data Intelligence Suite")
-    st.caption("Powered by Cohere Enterprise AI Models (Command R+ & Command R)")
+    st.caption("Powered by Cohere Enterprise AI Models")
     st.markdown("---")
 
     uploaded = st.file_uploader("📂 Upload Business Files (.csv or .xlsx)", type=["csv", "xlsx", "xls", "parquet"])
@@ -449,7 +449,7 @@ def main():
     # ---- FINAL TAB: COHERE AI EXECUTIVE BRIEFING ----
     with tab_objs[tab_offset]:
         st.subheader("🤖 AI Executive Briefing & Data Assistant (Cohere)")
-        st.caption("Powered by Cohere Command models for fast enterprise analytical reporting.")
+        st.caption("Powered by active Cohere Command models for fast enterprise reporting.")
 
         cohere_api_key = get_cohere_api_key()
 
@@ -458,10 +458,12 @@ def main():
             cohere_api_key = st.text_input("Or enter your Cohere API Key manually:", type="password")
 
         if cohere_api_key:
+            # FIXED ACTIVE MODEL ALIASES:
             cohere_models = [
-                "command-r-plus",
-                "command-r",
-                "command-light"
+                "command-a-03-2025",
+                "command-r-plus-08-2024",
+                "command-r-08-2024",
+                "command-r7b-12-2024"
             ]
             selected_model = st.selectbox("Select Cohere Model", cohere_models)
 
