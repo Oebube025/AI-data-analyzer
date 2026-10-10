@@ -1,801 +1,559 @@
-"""
-Executive Data Intelligence Suite (Cohere AI Engine & FastAPI Backend Integration)
-Phase 3 Decoupled Client — Includes Autonomous AI Dashboard Orchestrator.
-To run locally: streamlit run App1.py
-"""
-
-import io
-import os
-import time
-import json
-import hashlib
-import requests
-import numpy as np
-import pandas as pd
-import plotly.express as px
 import streamlit as st
-import cohere
+import pandas as pd
+import numpy as np
+import plotly.express as px
+import requests
+import io
+import json
 from pptx import Presentation
 from pptx.util import Inches, Pt
+from pptx.enum.text import PP_ALIGN
 from pptx.dml.color import RGBColor
 
-# ----------------------------------------------------------------------
-# FastAPI Backend Configuration
-# ----------------------------------------------------------------------
-BACKEND_URL = "http://127.0.0.1:8000"
-
-def check_backend_health() -> bool:
-    """Verifies connection with the FastAPI server."""
-    try:
-        res = requests.get(f"{BACKEND_URL}/", timeout=2)
-        return res.status_code == 200
-    except Exception:
-        return False
-
-def analyze_dataset_via_backend_api(file_name: str, file_bytes: bytes, file_type: str) -> dict:
-    """Sends uploaded dataset payload to FastAPI backend for analysis."""
-    files = {"file": (file_name, file_bytes, file_type)}
-    response = requests.post(f"{BACKEND_URL}/api/v1/analyze-file", files=files, timeout=10)
-    if response.status_code == 200:
-        return response.json()
-    else:
-        raise ValueError(f"Backend API error: {response.status_code}")
-
-# ----------------------------------------------------------------------
-# Page Configuration & Executive Styling
-# ----------------------------------------------------------------------
+# PAGE CONFIGURATION
 st.set_page_config(
-    page_title="Executive Data Intelligence Suite",
-    page_icon="💼",
+    page_title="Executive Data Intelligence Suite - Arcade SaaS Edition",
+    page_icon="🚀",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-def get_cohere_api_key() -> str:
-    """Retrieves Cohere API key safely from environment or Streamlit secrets."""
-    if os.getenv("COHERE_API_KEY"):
-        return os.getenv("COHERE_API_KEY")
-    try:
-        if "COHERE_API_KEY" in st.secrets:
-            return st.secrets["COHERE_API_KEY"]
-    except Exception:
-        pass
-    return ""
-
-def compute_dataset_hash(file_bytes: bytes, sheet_name: str = None) -> str:
-    """Creates a cryptographic hash of dataset content to prevent stale state."""
-    hasher = hashlib.sha256(file_bytes)
-    if sheet_name:
-        hasher.update(sheet_name.encode("utf-8"))
-    return hasher.hexdigest()
-
+# CUSTOM HIGH-ENERGY VIBRANT CYBERPUNK / SAAS CSS
 st.markdown("""
-    <style>
-    .stApp { background-color: #0f172a !important; color: #f8fafc !important; }
-    section[data-testid="stSidebar"] { background-color: #1e293b !important; border-right: 1px solid #334155 !important; }
-    div[data-testid="stMetric"] { background-color: #1e293b !important; border: 1px solid #334155 !important; padding: 18px 22px !important; border-radius: 10px !important; }
-    div[data-testid="stMetric"] label { color: #94a3b8 !important; font-weight: 600 !important; font-size: 0.85rem !important; }
-    div[data-testid="stMetric"] div[data-testid="stMetricValue"] { color: #38bdf8 !important; font-weight: 700 !important; }
-    button[data-baseweb="tab"] { color: #94a3b8 !important; font-weight: 600 !important; }
-    button[aria-selected="true"] { color: #38bdf8 !important; border-bottom-color: #38bdf8 !important; }
-    .stButton>button[kind="primary"] { background-color: #0284c7 !important; color: #ffffff !important; border-radius: 8px !important; }
-    </style>
+<style>
+    /* Global Cosmic Vibe */
+    .stApp {
+        background: radial-gradient(circle at top right, #0f172a 0%, #070913 100%);
+        color: #f3f4f6;
+    }
+    
+    /* Sidebar Styling */
+    section[data-testid="stSidebar"] {
+        background: linear-gradient(180deg, #0b0f19 0%, #05070c 100%);
+        border-right: 1px solid #1e293b;
+    }
+    
+    /* Glowing Neon Card Containers */
+    .saas-card {
+        background: linear-gradient(135deg, rgba(30, 41, 59, 0.7) 0%, rgba(15, 23, 42, 0.9) 100%);
+        border: 1px solid #38bdf8;
+        padding: 24px;
+        border-radius: 16px;
+        box-shadow: 0 0 20px rgba(56, 189, 248, 0.15);
+        margin-bottom: 20px;
+        transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+    .saas-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 0 25px rgba(56, 189, 248, 0.3);
+    }
+    
+    /* Typography & Headers */
+    h1, h2, h3 {
+        letter-spacing: -0.025em;
+        background: linear-gradient(90deg, #38bdf8, #818cf8, #c084fc);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+    }
+    
+    /* Neon Action Buttons */
+    .stButton>button {
+        background: linear-gradient(135deg, #38bdf8 0%, #6366f1 50%, #a855f7 100%);
+        color: white;
+        border: none;
+        border-radius: 10px;
+        font-weight: 700;
+        padding: 0.6rem 1.2rem;
+        box-shadow: 0 4px 15px rgba(99, 102, 241, 0.4);
+        transition: all 0.3s ease;
+    }
+    .stButton>button:hover {
+        transform: scale(1.02);
+        box-shadow: 0 6px 20px rgba(168, 85, 247, 0.6);
+    }
+    
+    /* Sleek Tab Styling */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 10px;
+        background-color: rgba(15, 23, 42, 0.5);
+        padding: 8px;
+        border-radius: 12px;
+        border: 1px solid #1e293b;
+    }
+    .stTabs [data-baseweb="tab"] {
+        background-color: #1e293b;
+        border-radius: 8px;
+        color: #94a3b8;
+        padding: 10px 18px;
+        font-weight: 600;
+    }
+    .stTabs [aria-selected="true"] {
+        background: linear-gradient(135deg, #38bdf8 0%, #6366f1 100%) !important;
+        color: #ffffff !important;
+        box-shadow: 0 0 15px rgba(56, 189, 248, 0.4);
+    }
+</style>
 """, unsafe_allow_html=True)
 
-# ----------------------------------------------------------------------
-# Data Processing Engine
-# ----------------------------------------------------------------------
-@st.cache_data(show_spinner="Processing business records...")
-def load_data(file_bytes: bytes, file_name: str, sheet_name=None) -> pd.DataFrame:
-    ext = os.path.splitext(file_name)[-1].lower()
-    buffer = io.BytesIO(file_bytes)
+# BACKEND API CONFIGURATION
+BACKEND_URL = "http://127.0.0.1:8000"
 
-    if ext == ".csv":
-        try:
-            df = pd.read_csv(buffer)
-        except UnicodeDecodeError:
-            buffer.seek(0)
-            df = pd.read_csv(buffer, encoding="latin-1")
-    elif ext in (".xlsx", ".xls"):
-        df = pd.read_excel(buffer, sheet_name=sheet_name or 0)
-    elif ext == ".parquet":
-        df = pd.read_parquet(buffer)
+def check_backend_status():
+    try:
+        response = requests.get(f"{BACKEND_URL}/health", timeout=2)
+        return response.status_code == 200
+    except Exception:
+        return False
+
+def analyze_dataset_via_backend_api(filename: str, file_bytes: bytes, mime_type: str):
+    files = {"file": (filename, file_bytes, mime_type)}
+    response = requests.post(f"{BACKEND_URL}/api/analyze", files=files, timeout=10)
+    if response.status_code == 200:
+        return response.json()
     else:
-        raise ValueError(f"Unsupported file format: {ext}")
+        raise Exception(f"Backend API error: {response.status_code} - {response.text}")
 
-    if df.columns.has_duplicates:
-        df.columns = pd.io.parsers.ParserBase({'names': df.columns})._maybe_dedup_names(df.columns)
-    return df
+def fetch_ai_advisory_from_backend(verified_stats: str):
+    response = requests.post(f"{BACKEND_URL}/api/ai-advisory", json={"verified_stats": verified_stats}, timeout=45)
+    if response.status_code == 200:
+        return response.json().get("advisory", "")
+    else:
+        raise Exception(f"Backend AI error: {response.status_code} - {response.text}")
 
-def list_sheets(file_bytes: bytes):
-    return pd.ExcelFile(io.BytesIO(file_bytes)).sheet_names
-
-# ----------------------------------------------------------------------
-# PowerPoint Presentation Export Generator
-# ----------------------------------------------------------------------
-def generate_pptx_deck(metrics: dict, field_inventory: pd.DataFrame, briefing_text: str = "") -> bytes:
-    prs = Presentation()
-    
-    # Slide 1: Title Slide
-    slide_layout = prs.slide_layouts[0]
-    slide = prs.slides.add_slide(slide_layout)
-    title = slide.shapes.title
-    subtitle = slide.placeholders[1]
-    title.text = "Executive Data Intelligence Briefing"
-    subtitle.text = "Automated Business Performance Report & AI Audit"
-
-    # Slide 2: Data Profile Summary
-    slide_layout = prs.slide_layouts[1]
-    slide = prs.slides.add_slide(slide_layout)
-    shapes = slide.shapes
-    shapes.title.text = "Dataset Health & Operational Summary"
-
-    tf = slide.placeholders[1].text_frame
-    tf.text = "Core Performance Indicators:"
-    for label, val in metrics.items():
-        p = tf.add_paragraph()
-        p.text = f"• {label}: {val}"
-        p.level = 0
-
-    # Slide 3: Executive Briefing Content
-    if briefing_text:
-        slide_layout = prs.slide_layouts[1]
-        slide = prs.slides.add_slide(slide_layout)
-        slide.shapes.title.text = "AI Executive Strategic Briefing"
-        tf = slide.placeholders[1].text_frame
-        clean_lines = [line for line in briefing_text.split("\n") if line.strip()][:12]
-        tf.text = "\n".join(clean_lines)
-
-    buffer = io.BytesIO()
-    prs.save(buffer)
-    buffer.seek(0)
-    return buffer.getvalue()
-
-# ----------------------------------------------------------------------
-# Business Data Engine
-# ----------------------------------------------------------------------
 class BusinessDataEngine:
-    def __init__(self, df: pd.DataFrame, focus_field=None):
+    def __init__(self, df: pd.DataFrame):
         self.df = df
-        self.focus_field = focus_field
-        self.num_cols = list(df.select_dtypes(include=[np.number]).columns)
-        self.cat_cols = list(df.select_dtypes(include=["object", "category", "bool"]).columns)
-        self.date_cols = list(df.select_dtypes(include=["datetime", "datetimetz"]).columns)
+        self.num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+        self.cat_cols = df.select_dtypes(include=['object', 'category', 'bool']).columns.tolist()
+        self.date_cols = [c for c in df.columns if any(k in c.lower() for k in ['date', 'time', 'year', 'month', 'period', 'created'])]
 
-    def executive_metrics(self):
-        df = self.df
-        total_cells = df.shape[0] * df.shape[1]
-        missing_cells = df.isnull().sum().sum()
-        health_score = round(((total_cells - missing_cells) / total_cells) * 100, 1) if total_cells > 0 else 100
-        
-        return {
-            "Total Records": f"{df.shape[0]:,}",
-            "Data Fields": f"{df.shape[1]:,}",
-            "Data Health Index": f"{health_score}%",
-            "Duplicate Entries": f"{int(df.duplicated().sum()):,}"
-        }
+    def audit_data_quality(self):
+        total_cells = self.df.size
+        if total_cells == 0:
+            return 0.0, 0, 0, []
+        missing_cells = self.df.isna().sum().sum()
+        health_score = max(0.0, min(100.0, ((total_cells - missing_cells) / total_cells) * 100))
+        issues = []
+        if missing_cells > 0:
+            issues.append(f"Found {missing_cells:,} missing/null data cells across dataset.")
+        duplicates = self.df.duplicated().sum()
+        if duplicates > 0:
+            issues.append(f"Detected {duplicates:,} fully duplicated row records.")
+        return round(health_score, 1), missing_cells, duplicates, issues
 
-    def field_inventory(self):
-        return pd.DataFrame({
-            "Field Name": self.df.columns,
-            "Field Type": [str(t).capitalize() for t in self.df.dtypes.values],
-            "Recorded Entries": self.df.notnull().sum().values,
-            "Unique Values": self.df.nunique().values,
-        })
+    def get_smart_time_series(self):
+        date_candidates = [col for col in self.df.columns if any(k in col.lower() for k in ['date', 'time', 'year', 'month', 'period', 'created'])]
+        if not date_candidates and self.date_cols:
+            date_candidates = self.date_cols
+        if date_candidates and self.num_cols:
+            d_col = date_candidates[0]
+            n_col = self.num_cols[0]
+            try:
+                temp_df = self.df.copy()
+                temp_df[d_col] = pd.to_datetime(temp_df[d_col], errors='coerce')
+                trend = temp_df.groupby(d_col)[n_col].sum().reset_index().sort_values(d_col)
+                if len(trend) > 1:
+                    return d_col, n_col, trend
+            except Exception:
+                pass
+        return None, None, None
 
-    def missing_summary(self):
-        counts = self.df.isnull().sum()
-        pct = (counts / len(self.df)) * 100
-        out = pd.DataFrame({"Missing Entries": counts, "Missing Share (%)": pct.round(2)})
-        return out[out["Missing Entries"] > 0].sort_values("Missing Entries", ascending=False)
+# SILENT BACKGROUND LOGIC (Running without rendering UI widgets)
+is_backend_online = check_backend_status()
+focus_field = "None"
 
-    def numeric_summary(self):
-        if not self.num_cols:
-            return None
-        summary = self.df[self.num_cols].describe().T
-        summary.rename(columns={
-            "count": "Record Count", "mean": "Average", "std": "Std Dev",
-            "min": "Minimum", "25%": "25th Pct", "50%": "Median", "75%": "75th Pct", "max": "Maximum"
-        }, inplace=True)
-        return summary.round(2)
+# MAIN HERO BANNER
+st.markdown("""
+    <div style='padding: 28px; background: linear-gradient(135deg, rgba(30, 41, 59, 0.8) 0%, rgba(15, 23, 42, 0.95) 100%); border-radius: 20px; border: 1px solid #38bdf8; box-shadow: 0 0 30px rgba(56, 189, 248, 0.2); margin-bottom: 24px; text-align: center;'>
+        <h1 style='margin:0; font-size: 2.4rem;'>🚀 Executive Data Intelligence Suite</h1>
+        <p style='margin: 10px 0 0 0; color: #94a3b8; font-size: 1.15rem;'>High-Velocity Business Analytics & Grounded AI Command Center</p>
+    </div>
+""", unsafe_allow_html=True)
 
-    def detect_anomalies(self):
-        rows = []
-        for col in self.num_cols:
-            series = self.df[col].dropna()
-            if len(series) < 4:
-                continue
-            q1, q3 = series.quantile(0.25), series.quantile(0.75)
-            iqr = q3 - q1
-            lower, upper = q1 - 1.5 * iqr, q3 + 1.5 * iqr
-            count = int(((series < lower) | (series > upper)).sum())
-            if count > 0:
-                rows.append({
-                    "Business Field": col,
-                    "Potential Outliers": count,
-                    "Observed Outlier Share (%)": round(100 * count / len(series), 2),
-                    "Expected Min": round(lower, 2),
-                    "Expected Max": round(upper, 2),
-                })
-        return pd.DataFrame(rows)
+uploaded = st.file_uploader("✨ Drop Your Business Dataset (.csv or .xlsx)", type=["csv", "xlsx"])
 
-    def compute_grounded_context(self) -> str:
-        facts = []
-        df = self.df
-
-        for col in self.cat_cols[:3]:
-            top_vals = df[col].value_counts().head(3).to_dict()
-            facts.append(f"Top categories for '{col}': {top_vals}")
-
-        if self.num_cols:
-            sums = df[self.num_cols].sum().round(2).to_dict()
-            means = df[self.num_cols].mean().round(2).to_dict()
-            facts.append(f"Column Totals: {sums}")
-            facts.append(f"Column Averages: {means}")
-
-        if self.focus_field and self.num_cols and self.focus_field in self.cat_cols:
-            top_num = self.num_cols[0]
-            grouped = df.groupby(self.focus_field)[top_num].sum().nlargest(5).to_dict()
-            facts.append(f"Top 5 '{self.focus_field}' by sum of '{top_num}': {grouped}")
-
-        return "\n".join(facts)
-
-    def generate_cohere_briefing(self, api_key: str, selected_model: str) -> str:
-        co = cohere.ClientV2(api_key=api_key)
-
-        metrics = self.executive_metrics()
-        missing = self.missing_summary().to_dict(orient="index") if not self.missing_summary().empty else "None"
-        anomalies = self.detect_anomalies().to_dict(orient="records") if not self.detect_anomalies().empty else "None"
-        grounded_facts = self.compute_grounded_context()
-
-        prompt = f"""
-You are an elite C-suite Strategy Consultant & Data Architect. Review the verified dataset calculations below and write a concise, executive-level business briefing in clean Markdown.
-
-### Verified Executive KPI Summary
-{metrics}
-
-### Operational Health & Missing Data
-{missing}
-
-### Risk & Statistical Outliers
-{anomalies}
-
-### Deterministic Data Facts & Calculations
-{grounded_facts}
-
-Focus Field: {self.focus_field if self.focus_field else "General Performance Audit"}
-
----
-### Deliverable Requirements:
-1. **Executive Briefing**: Summary of scale, health index, and utility.
-2. **Operational Risks & Data Gaps**: Critical missing fields or outliers.
-3. **Core Performance Insights**: Highlight exact values provided in the data facts above.
-4. **Actionable Recommendations**: 3 to 4 prioritized strategic steps.
-"""
+if uploaded is not None:
+    if "current_filename" not in st.session_state or st.session_state["current_filename"] != uploaded.name:
+        file_bytes = uploaded.getvalue()
         try:
-            response = co.chat(
-                model=selected_model,
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.2
-            )
-            return response.message.content[0].text
-        except Exception as e:
-            return f"⚠️ Unable to generate briefing. Details: {str(e)}"
-
-    def generate_orchestrator_blueprint(self, api_key: str, selected_model: str) -> dict:
-        """Asks Cohere to analyze schema profile and return a clean JSON dashboard blueprint."""
-        co = cohere.ClientV2(api_key=api_key)
-        
-        profile = {
-            "columns": list(self.df.columns),
-            "dtypes": {col: str(t) for col, t in self.df.dtypes.items()},
-            "categorical_columns": self.cat_cols,
-            "numeric_columns": self.num_cols,
-            "total_rows": len(self.df)
-        }
-
-        prompt = f"""
-You are an autonomous Master BI Orchestrator Agent. Analyze this dataset profile and return a dashboard blueprint strictly in valid JSON format (no markdown code blocks, just raw JSON).
-
-Dataset Profile:
-{profile}
-
-JSON Structure Required:
-{{
-  "dashboard_title": "Suggested Executive Dashboard Title",
-  "recommended_focus_metric": "Name of the most important numeric column",
-  "recommended_category_dimension": "Name of the best categorical column",
-  "key_insight": "A 2-sentence summary of what this dataset appears to track.",
-  "suggested_charts": [
-    {{"type": "bar", "x": "column_name", "y": "column_name", "title": "Chart Title"}},
-    {{"type": "histogram", "x": "column_name", "title": "Distribution Title"}}
-  ]
-}}
-"""
-        try:
-            response = co.chat(
-                model=selected_model,
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.1
-            )
-            raw_text = response.message.content[0].text.strip()
-            # Clean potential markdown wrapping
-            if raw_text.startswith("```"):
-                raw_text = raw_text.split("```")[1]
-                if raw_text.startswith("json"):
-                    raw_text = raw_text[4:]
-            return json.loads(raw_text.strip())
-        except Exception as e:
-            return {
-                "dashboard_title": "Autonomous Executive Dashboard",
-                "recommended_focus_metric": self.num_cols[0] if self.num_cols else "N/A",
-                "recommended_category_dimension": self.cat_cols[0] if self.cat_cols else "N/A",
-                "key_insight": f"Fallback blueprint generated due to parsing error: {str(e)}",
-                "suggested_charts": []
-            }
-
-    def execute_nl_pandas_query(self, api_key: str, selected_model: str, user_query: str) -> tuple[str, str, dict]:
-        co = cohere.ClientV2(api_key=api_key)
-        schema_info = {col: str(dtype) for col, dtype in zip(self.df.columns, self.df.dtypes)}
-        
-        prompt = f"""
-You are a Python Data Analysis Assistant. Write ONLY executable Python code using pandas to answer the user's question.
-The dataframe is already loaded as `df`. Store the final answer in a variable named `result`.
-
-Dataframe Columns & Types:
-{schema_info}
-
-User Question: {user_query}
-
-Rules:
-- Do NOT include markdown formatting or backticks like ```python.
-- Write raw Python code only.
-- Set `result` to a string, DataFrame, Series, or number that answers the query.
-"""
-        start_time = time.time()
-        try:
-            response = co.chat(
-                model=selected_model,
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.0
-            )
-            code = response.message.content[0].text.strip().replace("```python", "").replace("```", "").strip()
-
-            local_vars = {"df": self.df.copy(), "pd": pd, "np": np}
-            exec(code, {}, local_vars)
+            if uploaded.name.endswith('.csv'):
+                orig_df = pd.read_csv(io.BytesIO(file_bytes))
+            else:
+                orig_df = pd.read_excel(io.BytesIO(file_bytes))
             
-            result = local_vars.get("result", "Query executed, but no `result` variable was assigned.")
-            exec_time = round((time.time() - start_time) * 1000, 2)
-
-            provenance = {
-                "Execution Time": f"{exec_time} ms",
-                "Rows Analyzed": f"{len(self.df):,}",
-                "Columns Utilized": ", ".join([col for col in self.df.columns if col in code]),
-                "Execution Code": code
-            }
-            return str(result), code, provenance
-
+            st.session_state["current_filename"] = uploaded.name
+            st.session_state["raw_file_bytes"] = file_bytes
+            st.session_state["active_df"] = orig_df.copy()
+            st.session_state["transformation_history"] = ["Dataset loaded successfully."]
         except Exception as e:
-            provenance = {"Execution Mode": "Error Handled", "Error": str(e)}
-            return "Unable to execute query.", "# Execution error", provenance
+            st.error(f"Error loading file: {e}")
+            st.stop()
 
-# ----------------------------------------------------------------------
-# Streamlit Application
-# ----------------------------------------------------------------------
-def main():
-    st.title("💼 Executive Data Intelligence Suite")
-    st.caption("Phase 3 Decoupled Client — Integrated with Autonomous BI Orchestrator & FastAPI")
-    st.markdown("---")
+    df = st.session_state["active_df"]
+    engine = BusinessDataEngine(df)
 
-    # Sidebar: System Status & Settings
-    with st.sidebar:
-        st.markdown("### 🔌 System Connectivity")
-        is_backend_online = check_backend_health()
-        if is_backend_online:
-            st.success("🟢 FastAPI Backend: Online")
-            st.caption(f"Connected to `{BACKEND_URL}`")
-        else:
-            st.warning("🟡 Local Mode (FastAPI Offline)")
-
-        st.markdown("---")
-
-    uploaded = st.file_uploader("📂 Upload Business Files (.csv or .xlsx)", type=["csv", "xlsx", "xls", "parquet"])
+    # STREAMLINED SIDEBAR (ONLY ESSENTIAL FILTERS)
+    st.sidebar.markdown("### 🔍 Live Dataset Filters")
     
-    if uploaded is None:
-        st.info("👋 Welcome! Please upload your business dataset above to launch the analysis environment.")
-        return
+    filtered_df = df.copy()
+    if engine.cat_cols:
+        filter_cat_col = st.sidebar.selectbox("Filter Category", ["None"] + engine.cat_cols)
+        if filter_cat_col != "None":
+            unique_vals = df[filter_cat_col].dropna().unique().tolist()
+            selected_vals = st.sidebar.multiselect(f"Select {filter_cat_col}", unique_vals, default=unique_vals[:min(5, len(unique_vals))])
+            if selected_vals:
+                filtered_df = filtered_df[filtered_df[filter_cat_col].isin(selected_vals)]
 
-    file_bytes = uploaded.getvalue()
-    sheet = None
-    if uploaded.name.lower().endswith((".xlsx", ".xls")):
-        sheets = list_sheets(file_bytes)
-        if len(sheets) > 1:
-            sheet = st.selectbox("Select Business Worksheet", sheets)
-
-    current_hash = compute_dataset_hash(file_bytes, sheet)
-
-    if "dataset_hash" not in st.session_state or st.session_state["dataset_hash"] != current_hash:
-        try:
-            loaded_df = load_data(file_bytes, uploaded.name, sheet)
-            st.session_state["original_df"] = loaded_df.copy()
-            st.session_state["current_df"] = loaded_df.copy()
-            st.session_state["transformation_stack"] = []
-            st.session_state["dataset_hash"] = current_hash
-            st.session_state.pop("ai_briefing", None)
-            st.session_state.pop("orchestrator_blueprint", None)
-            st.session_state.pop("last_answer", None)
-            st.session_state.pop("backend_api_result", None)
-        except Exception as e:
-            st.error(f"Error loading business file: {e}")
-            return
-
-    raw_df = st.session_state["current_df"]
-
-    if raw_df.empty:
-        st.warning("The uploaded file contains no active data records.")
-        return
-
-    # Interactive Global Filter Bar
-    with st.expander("🔍 Interactive Global Filters (Applies Across All Tabs)", expanded=False):
-        f_cols = st.columns(3)
-        filtered_df = raw_df.copy()
-        
-        cat_cols = list(raw_df.select_dtypes(include=["object", "category"]).columns)
-        num_cols = list(raw_df.select_dtypes(include=[np.number]).columns)
-
-        if cat_cols:
-            with f_cols[0]:
-                filter_cat_col = st.selectbox("Filter Category Field", ["None"] + cat_cols)
-                if filter_cat_col != "None":
-                    selected_cats = st.multiselect("Select Categories", raw_df[filter_cat_col].dropna().unique().tolist())
-                    if selected_cats:
-                        filtered_df = filtered_df[filtered_df[filter_cat_col].isin(selected_cats)]
-
-        if num_cols:
-            with f_cols[1]:
-                filter_num_col = st.selectbox("Filter Numeric Field", ["None"] + num_cols)
-                if filter_num_col != "None":
-                    min_v, max_v = float(raw_df[filter_num_col].min()), float(raw_df[filter_num_col].max())
-                    if min_v < max_v:
-                        val_range = st.slider(f"Range for {filter_num_col}", min_v, max_v, (min_v, max_v))
-                        filtered_df = filtered_df[(filtered_df[filter_num_col] >= val_range[0]) & (filtered_df[filter_num_col] <= val_range[1])]
-
-        with f_cols[2]:
-            st.markdown("<br>", unsafe_allow_html=True)
-            st.caption(f"**Filtered Output:** {len(filtered_df):,} of {len(raw_df):,} rows")
-
-    df = filtered_df
-
-    with st.sidebar:
-        st.markdown("### ⚙️ Analysis Settings")
-        target_selection = st.selectbox("Focus Field / KPI Domain", ["None"] + list(df.columns))
-        focus_field = None if target_selection == "None" else target_selection
-
-        st.markdown("---")
-        st.markdown("### 📜 Transformation Stack")
-        stack = st.session_state.get("transformation_stack", [])
-        if stack:
-            st.caption(f"Active Transformations: **{len(stack)}**")
-            for idx, action in enumerate(stack, 1):
-                st.text(f"{idx}. {action}")
-            
-            if st.button("⏪ Undo Last Transformation", use_container_width=True):
-                st.session_state["transformation_stack"].pop()
-                temp_df = st.session_state["original_df"].copy()
-                st.session_state["current_df"] = temp_df
-                st.rerun()
+    st.sidebar.success(f"⚡ Active Records: {len(filtered_df):,} / {len(df):,}")
+    
+    if st.sidebar.button("🔄 Reset Transformations"):
+        file_bytes = st.session_state["raw_file_bytes"]
+        if st.session_state["current_filename"].endswith('.csv'):
+            st.session_state["active_df"] = pd.read_csv(io.BytesIO(file_bytes))
         else:
-            st.caption("No transformations applied yet.")
+            st.session_state["active_df"] = pd.read_excel(io.BytesIO(file_bytes))
+        st.session_state["transformation_history"] = ["Reset to original uploaded state."]
+        st.experimental_rerun()
 
-        if st.button("🔄 Reset All Transformations", use_container_width=True):
-            st.session_state["current_df"] = st.session_state["original_df"].copy()
-            st.session_state["transformation_stack"] = []
-            st.session_state.pop("ai_briefing", None)
-            st.session_state.pop("orchestrator_blueprint", None)
-            st.success("Dataset restored!")
-            st.rerun()
-
-    engine = BusinessDataEngine(df, focus_field)
-
-    tabs = ["🤖 Autonomous AI Agent", "📈 Executive Dashboard", "🧹 Data Refinement", "📊 Metric Visualizations", "⚠️ Anomaly Audit"]
-    if focus_field:
-        tabs.append("🎯 Focus Field Drilldown")
-    tabs.append("🤖 AI Executive Briefing & Export")
-    tabs.append("⚡ FastAPI Backend Pipeline")
-
+    tabs = [
+        "🤖 AI Adviser",
+        "💰 Sales & Profit",
+        "📊 Leaderboard",
+        "🛠️ Data Health",
+        "⚠️ Anomaly Radar",
+        "📈 Boardroom PPTX",
+        "⚡ Neural Backend"
+    ]
+    
     tab_objs = st.tabs(tabs)
+    tab_offset = 0
 
-    # TAB 1: AUTONOMOUS AI AGENT ORCHESTRATOR
-    with tab_objs[0]:
-        st.subheader("🤖 Autonomous BI Orchestrator Agent")
-        st.caption("Drop your data and let Cohere automatically inspect schema profiles, discover key metrics, and build your custom dashboard blueprint.")
+    # TAB 1: AI ADVISER
+    with tab_objs[tab_offset]:
+        tab_offset += 1
+        st.subheader("🤖 Module 4: Grounded AI Business Adviser")
+        st.caption("Generate high-impact strategic advisory powered by secure server-side AI intelligence.")
+        
+        if not is_backend_online:
+            st.warning("⚠️ FastAPI Backend is offline. Start your backend server to unleash AI advisory.")
+        else:
+            if st.button("✨ Summon AI Business Advisory", type="primary"):
+                with st.spinner("🔮 Analyzing verified metrics and consulting AI intelligence..."):
+                    try:
+                        total_rows = len(filtered_df)
+                        health_score, _, _, _ = engine.audit_data_quality()
+                        num_summary = filtered_df[engine.num_cols].describe().to_string() if engine.num_cols else "No numeric data"
+                        
+                        verified_stats = f"""
+                        Verified Dataset Statistics:
+                        - Filename: {st.session_state['current_filename']}
+                        - Filtered Row Count: {total_rows:,}
+                        - Data Health Index: {health_score}%
+                        - Numeric Columns Summary:
+                        {num_summary}
+                        """
+                        
+                        advisory_result = fetch_ai_advisory_from_backend(verified_stats)
+                        st.session_state["grounded_ai_output"] = advisory_result
+                        st.balloons()
+                        st.success("🎉 AI Business Advisory Summoned Successfully!")
+                    except Exception as e:
+                        st.error(f"Failed to generate AI advisory: {e}")
 
-        cohere_api_key = get_cohere_api_key()
-        if not cohere_api_key:
-            cohere_api_key = st.text_input("Enter Cohere API Key:", type="password", key="agent_key")
-
-        if cohere_api_key:
-            selected_model = st.selectbox("Select Orchestrator Model", ["command-a-03-2025", "command-r-plus-08-2024", "command-r-08-2024"], key="agent_model")
-            
-            if st.button("🚀 Run Autonomous Dashboard Orchestrator", type="primary"):
-                with st.spinner("Agent is analyzing schema profile and building dashboard layout..."):
-                    blueprint = engine.generate_orchestrator_blueprint(api_key=cohere_api_key, selected_model=selected_model)
-                    st.session_state["orchestrator_blueprint"] = blueprint
-
-        if "orchestrator_blueprint" in st.session_state:
-            bp = st.session_state["orchestrator_blueprint"]
+        if "grounded_ai_output" in st.session_state:
             st.markdown("---")
-            st.markdown(f"### ✨ {bp.get('dashboard_title', 'Executive Dashboard')}")
-            st.info(f"💡 **AI Orchestrator Insight:** {bp.get('key_insight', '')}")
+            st.markdown(st.session_state["grounded_ai_output"])
 
-            # Render Recommended KPIs
-            metrics = engine.executive_metrics()
-            cols = st.columns(len(metrics))
-            for col, (label, val) in zip(cols, metrics.items()):
-                col.metric(label, val)
+    # TAB 2: SALES & PROFIT DASHBOARD
+    with tab_objs[tab_offset]:
+        tab_offset += 1
+        st.subheader("💰 Module 1: Small Business Sales & Profit Command Center")
+        
+        rev_candidates = [c for c in engine.num_cols if any(k in c.lower() for k in ['revenue', 'sales', 'amount', 'total', 'price'])]
+        cost_candidates = [c for c in engine.num_cols if any(k in c.lower() for k in ['cost', 'expense', 'spend', 'budget'])]
 
-            st.markdown("---")
-            st.markdown("### 📊 Agent-Recommended Visualizations")
-            
-            rec_cat = bp.get("recommended_category_dimension")
-            rec_num = bp.get("recommended_focus_metric")
+        sel_rev = st.selectbox("Select Revenue Metric", engine.num_cols, index=engine.num_cols.index(rev_candidates[0]) if rev_candidates else 0)
+        sel_cost = st.selectbox("Select Cost Metric (Optional)", ["None"] + engine.num_cols)
 
-            c_cols = st.columns(2)
-            with c_cols[0]:
-                if rec_cat and rec_cat in df.columns and rec_num and rec_num in df.columns:
-                    grouped_df = df.groupby(rec_cat)[rec_num].sum().reset_index().nlargest(10, rec_num)
-                    fig = px.bar(grouped_df, x=rec_cat, y=rec_num, title=f"Top {rec_cat} by {rec_num}", template="plotly_dark", color_discrete_sequence=["#38bdf8"])
-                    st.plotly_chart(fig, use_container_width=True)
-                elif engine.cat_cols and engine.num_cols:
-                    fallback_cat = engine.cat_cols[0]
-                    fallback_num = engine.num_cols[0]
-                    grouped_df = df.groupby(fallback_cat)[fallback_num].sum().reset_index().nlargest(10, fallback_num)
-                    fig = px.bar(grouped_df, x=fallback_cat, y=fallback_num, title=f"Top {fallback_cat} by {fallback_num}", template="plotly_dark", color_discrete_sequence=["#38bdf8"])
-                    st.plotly_chart(fig, use_container_width=True)
+        total_revenue = filtered_df[sel_rev].sum()
+        total_costs = filtered_df[sel_cost].sum() if sel_cost != "None" else 0.0
+        net_profit = total_revenue - total_costs
+        profit_margin = (net_profit / total_revenue * 100) if total_revenue > 0 else 0.0
 
-            with c_cols[1]:
-                if rec_num and rec_num in df.columns:
-                    fig_hist = px.histogram(df, x=rec_num, title=f"Distribution of {rec_num}", template="plotly_dark", color_discrete_sequence=["#14b8a6"])
-                    st.plotly_chart(fig_hist, use_container_width=True)
-                elif engine.num_cols:
-                    fallback_num = engine.num_cols[0]
-                    fig_hist = px.histogram(df, x=fallback_num, title=f"Distribution of {fallback_num}", template="plotly_dark", color_discrete_sequence=["#14b8a6"])
-                    st.plotly_chart(fig_hist, use_container_width=True)
-
-    # TAB 2: DASHBOARD
-    with tab_objs[1]:
-        st.subheader("Key Data Health Metrics")
-        metrics = engine.executive_metrics()
-        cols = st.columns(len(metrics))
-        for col, (label, val) in zip(cols, metrics.items()):
-            col.metric(label, val)
-
-        st.markdown("<br>", unsafe_allow_html=True)
-        col1, col2 = st.columns([3, 2])
-        with col1:
-            st.subheader("Records Preview")
-            n_rows = st.slider("Display Rows", 5, min(100, len(df)), 10)
-            st.dataframe(df.head(n_rows), use_container_width=True)
-        with col2:
-            st.subheader("Field Inventory")
-            st.dataframe(engine.field_inventory(), use_container_width=True, hide_index=True)
-
-    # TAB 3: DATA REFINEMENT
-    with tab_objs[2]:
-        st.subheader("🧹 Interactive Data Refinement & Cleanup")
-        c1, c2 = st.columns(2)
-        with c1:
-            st.markdown("##### 1. Clean Missing Values")
-            missing_cols = list(df.columns[df.isnull().any()])
-            if missing_cols:
-                col_to_fix = st.selectbox("Select Field to Repair", missing_cols)
-                is_num = pd.api.types.is_numeric_dtype(df[col_to_fix])
-
-                strategies = ["Remove empty rows"]
-                if is_num:
-                    strategies.extend(["Fill with Field Average", "Fill with Median", "Set to Zero"])
-                else:
-                    strategies.extend(["Fill with Most Frequent (Mode)", "Set to 'N/A'"])
-
-                strategy = st.selectbox("Correction Method", strategies)
-
-                if st.button("Apply Correction", type="primary"):
-                    working_df = st.session_state["current_df"].copy()
-                    
-                    if strategy == "Remove empty rows":
-                        working_df = working_df.dropna(subset=[col_to_fix])
-                    elif strategy == "Fill with Field Average" and is_num:
-                        working_df[col_to_fix] = working_df[col_to_fix].fillna(working_df[col_to_fix].mean())
-                    elif strategy == "Fill with Median" and is_num:
-                        working_df[col_to_fix] = working_df[col_to_fix].fillna(working_df[col_to_fix].median())
-                    elif strategy == "Set to Zero" and is_num:
-                        working_df[col_to_fix] = working_df[col_to_fix].fillna(0)
-                    elif strategy == "Fill with Most Frequent (Mode)" and not is_num:
-                        mode_vals = working_df[col_to_fix].mode()
-                        if not mode_vals.empty:
-                            working_df[col_to_fix] = working_df[col_to_fix].fillna(mode_vals[0])
-                    elif strategy == "Set to 'N/A'" and not is_num:
-                        working_df[col_to_fix] = working_df[col_to_fix].fillna("N/A")
-
-                    st.session_state["current_df"] = working_df
-                    st.session_state["transformation_stack"].append(f"Fixed '{col_to_fix}' using {strategy}")
-                    st.success(f"Updated field: {col_to_fix}")
-                    st.rerun()
-            else:
-                st.success("✅ All data fields are 100% complete!")
-
-        with c2:
-            st.markdown("##### 2. Deduplication & Column Removal")
-            dup_count = df.duplicated().sum()
-            st.write(f"Duplicate Entries Identified: **{dup_count}**")
-            if dup_count > 0 and st.button("Remove Duplicate Entries"):
-                st.session_state["current_df"] = df.drop_duplicates()
-                st.session_state["transformation_stack"].append(f"Purged {dup_count} duplicate rows")
-                st.success("Duplicates purged!")
-                st.rerun()
-
-            remove_cols = st.multiselect("Select Fields to Exclude", list(df.columns))
-            if remove_cols and st.button("Remove Selected Fields"):
-                st.session_state["current_df"] = df.drop(columns=remove_cols)
-                st.session_state["transformation_stack"].append(f"Dropped columns: {', '.join(remove_cols)}")
-                st.success("Fields excluded!")
-                st.rerun()
+        p1, p2, p3, p4 = st.columns(4)
+        p1.metric("💵 Total Revenue", f"${total_revenue:,.2f}")
+        p2.metric("📉 Total Costs", f"${total_costs:,.2f}")
+        p3.metric("🚀 Net Profit", f"${net_profit:,.2f}")
+        p4.metric("📈 Profit Margin", f"{profit_margin:.1f}%")
 
         st.markdown("---")
-        st.subheader("💾 Export Refined Records")
-        e_col1, e_col2 = st.columns(2)
-        with e_col1:
-            csv_data = st.session_state["current_df"].to_csv(index=False).encode("utf-8")
-            st.download_button("📥 Download Refined CSV", data=csv_data, file_name="refined_data.csv", mime="text/csv", use_container_width=True)
-        with e_col2:
-            excel_buffer = io.BytesIO()
-            with pd.ExcelWriter(excel_buffer, engine="xlsxwriter") as writer:
-                st.session_state["current_df"].to_excel(writer, index=False, sheet_name="Clean Data")
-            excel_buffer.seek(0)
-            st.download_button("📥 Download Refined Excel", data=excel_buffer.getvalue(), file_name="refined_data.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
-
-    # TAB 4: VISUALIZATIONS
-    with tab_objs[3]:
-        st.subheader("📊 Business Data Explorers")
-        v1, v2 = st.columns(2)
-        with v1:
-            if engine.num_cols:
-                num_field = st.selectbox("Select Metric Field", engine.num_cols)
-                st.plotly_chart(px.histogram(df, x=num_field, title=f"Distribution: {num_field}", color_discrete_sequence=["#38bdf8"], template="plotly_dark"))
-        with v2:
-            if engine.cat_cols:
-                cat_field = st.selectbox("Select Category Field", engine.cat_cols)
-                counts = df[cat_field].astype(str).value_counts().head(10).reset_index()
-                counts.columns = [cat_field, "Volume"]
-                fig_cat = px.bar(counts, x="Volume", y=cat_field, orientation="h", title=f"Top Categories: {cat_field}", template="plotly_dark")
-                fig_cat.update_yaxes(autorange="reversed")
-                st.plotly_chart(fig_cat)
-
-    # TAB 5: ANOMALIES
-    with tab_objs[4]:
-        st.subheader("⚠️ Anomaly & Risk Audit")
-        if engine.num_cols:
-            anomalies = engine.detect_anomalies()
-            if anomalies.empty:
-                st.success("✅ No statistical outliers detected using 1.5x IQR rule.")
-            else:
-                st.dataframe(anomalies, use_container_width=True, hide_index=True)
-                inspect_field = st.selectbox("Select Field for Outlier Inspection", anomalies["Business Field"].tolist())
-                st.plotly_chart(px.box(df, y=inspect_field, title=f"Outlier Map: {inspect_field}", color_discrete_sequence=["#f43f5e"], template="plotly_dark"))
+        t_col, _, trend_data = engine.get_smart_time_series()
+        if t_col is not None and trend_data is not None:
+            fig_trend = px.line(filtered_df.groupby(t_col)[sel_rev].sum().reset_index(), x=t_col, y=sel_rev, title=f"⚡ Sales Velocity Over Time ({t_col})", template="plotly_dark", color_discrete_sequence=["#38bdf8"])
+            st.plotly_chart(fig_trend, use_container_width=True)
         else:
-            st.info("No numerical metric fields available for anomaly detection.")
+            fig_hist = px.histogram(filtered_df, x=sel_rev, title=f"📊 Distribution of {sel_rev}", template="plotly_dark", color_discrete_sequence=["#38bdf8"])
+            st.plotly_chart(fig_hist, use_container_width=True)
 
-    tab_offset = 5
-    if focus_field:
-        with tab_objs[tab_offset]:
-            st.subheader(f"🎯 KPI Drilldown: {focus_field}")
-            if pd.api.types.is_numeric_dtype(df[focus_field]):
-                st.plotly_chart(px.histogram(df, x=focus_field, title=f"Distribution of {focus_field}", color_discrete_sequence=["#14b8a6"], template="plotly_dark"))
-            else:
-                counts = df[focus_field].value_counts().reset_index()
-                counts.columns = [focus_field, "Count"]
-                st.plotly_chart(px.bar(counts, x=focus_field, y="Count", title=f"Volume: {focus_field}", template="plotly_dark"))
+        st.markdown("---")
+        st.dataframe(filtered_df.head(15), use_container_width=True)
+
+    # TAB 3: PERFORMANCE LEADERBOARD
+    with tab_objs[tab_offset]:
         tab_offset += 1
+        st.subheader("📊 Module 2: Business Performance Leaderboard")
+        if engine.cat_cols and engine.num_cols:
+            perf_cat = st.selectbox("Grouping Dimension", engine.cat_cols)
+            perf_num = st.selectbox("Performance Metric", engine.num_cols)
 
-    # TAB 6: COHERE AI EXECUTIVE BRIEFING & EXPORT
+            col_l, col_r = st.columns(2)
+            with col_l:
+                st.markdown("#### 🏆 Top Performers")
+                st.dataframe(filtered_df.groupby(perf_cat)[perf_num].sum().nlargest(5).reset_index(), use_container_width=True)
+            with col_r:
+                st.markdown("#### ⚠️ Underperformers")
+                st.dataframe(filtered_df.groupby(perf_cat)[perf_num].sum().nsmallest(5).reset_index(), use_container_width=True)
+        else:
+            st.info("Dataset requires categorical and numerical columns.")
+
+    # TAB 4: DATA REFINEMENT & QUALITY
     with tab_objs[tab_offset]:
-        st.subheader("🤖 Grounded AI Briefing & Executive Presentation Deck Export")
-        cohere_api_key = get_cohere_api_key()
+        tab_offset += 1
+        st.subheader("🛠️ Module 3: Data Quality & Health Audit")
+        health_score, missing_cells, duplicates, issues = engine.audit_data_quality()
+        
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("📂 Active Rows", f"{len(filtered_df):,}")
+        c2.metric("📊 Columns", f"{len(filtered_df.columns):,}")
+        c3.metric("✨ Health Index", f"{health_score}%")
+        c4.metric("⚠️ Flagged Issues", len(issues))
+        
+        st.markdown("---")
+        if issues:
+            for issue in issues:
+                st.warning(issue)
+        else:
+            st.success("✨ Pristine Dataset! Zero quality anomalies detected.")
 
-        if not cohere_api_key:
-            st.error("🔑 Cohere API Key Missing: Configure `COHERE_API_KEY` in Secrets or Environment.")
-            cohere_api_key = st.text_input("Enter key manually:", type="password", key="briefing_key")
+        st.markdown("---")
+        csv_data = filtered_df.to_csv(index=False).encode('utf-8')
+        st.download_button("📥 Download Cleaned Dataset (.csv)", data=csv_data, file_name="cleaned_dataset.csv", mime="text/csv")
 
-        if cohere_api_key:
-            cohere_models = [
-                "command-a-03-2025",
-                "command-r-plus-08-2024",
-                "command-r-08-2024",
-                "command-r7b-12-2024"
-            ]
-            selected_model = st.selectbox("Select Cohere Model", cohere_models, key="briefing_model")
+    # TAB 5: EXPENSE & ANOMALY MONITOR
+    with tab_objs[tab_offset]:
+        tab_offset += 1
+        st.subheader("⚠️ Anomaly Radar & Outlier Detection")
+        if engine.num_cols:
+            anomaly_metric = st.selectbox("Select Audit Metric", engine.num_cols)
+            series = filtered_df[anomaly_metric].dropna()
+            mean_val = series.mean()
+            std_val = series.std()
+            anomalies = filtered_df[np.abs(filtered_df[anomaly_metric] - mean_val) > (2.5 * std_val)]
+            st.write(f"🚨 Flagged **{len(anomalies)} statistical outlier records** in `{anomaly_metric}`.")
+            st.dataframe(anomalies.head(15), use_container_width=True)
+        else:
+            st.info("No numeric columns available.")
 
-            if st.button("🚀 Generate Executive Briefing", type="primary"):
-                with st.spinner("Calculating facts & querying Cohere AI..."):
-                    briefing_md = engine.generate_cohere_briefing(api_key=cohere_api_key, selected_model=selected_model)
-                    st.session_state["ai_briefing"] = briefing_md
+    # TAB 6: BOARDROOM PPTX EXPORT
+    with tab_objs[tab_offset]:
+        tab_offset += 1
+        st.subheader("📈 Boardroom-Ready Executive PowerPoint Suite")
+        st.caption("Export a stunning consulting-grade 6-slide presentation deck instantly.")
 
-        if "ai_briefing" in st.session_state:
-            st.markdown("---")
-            st.markdown(st.session_state["ai_briefing"])
-            
-            st.markdown("### 📊 Export Executive Presentation Deck")
-            pptx_bytes = generate_pptx_deck(
-                metrics=engine.executive_metrics(),
-                field_inventory=engine.field_inventory(),
-                briefing_text=st.session_state["ai_briefing"]
-            )
-            st.download_button(
-                label="💻 Download Executive PowerPoint Presentation (.pptx)",
-                data=pptx_bytes,
-                file_name="Executive_Data_Briefing.pptx",
-                mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
-                use_container_width=True
-            )
-
-        if cohere_api_key:
-            st.markdown("---")
-            st.subheader("⚡ Execute Dynamic Data Queries (Natural Language to Pandas)")
-            user_query = st.text_input("Enter query (e.g., 'Show top 5 categories by average value')")
-            if st.button("⚡ Execute Query Sandbox"):
-                if user_query.strip():
-                    with st.spinner("Generating Pandas code and running in execution sandbox..."):
-                        res_val, code_executed, provenance = engine.execute_nl_pandas_query(
-                            api_key=cohere_api_key,
-                            selected_model=selected_model,
-                            user_query=user_query
-                        )
-                        st.session_state["sandbox_result"] = res_val
-                        st.session_state["sandbox_code"] = code_executed
-                        st.session_state["sandbox_provenance"] = provenance
-
-            if "sandbox_result" in st.session_state:
-                st.markdown("### 📊 Query Result")
-                st.code(st.session_state["sandbox_result"])
+        if st.button("🚀 Generate Boardroom Presentation (.pptx)", type="primary"):
+            try:
+                prs = Presentation()
+                health_score, missing_cells, duplicates, issues = engine.audit_data_quality()
                 
-                with st.expander("🔍 View Execution Code & Analytical Provenance"):
-                    st.markdown("**Executed Pandas Code:**")
-                    st.code(st.session_state["sandbox_code"], language="python")
-                    st.markdown("**Execution Audit & Provenance:**")
-                    st.json(st.session_state["sandbox_provenance"])
+                rev_cands = [c for c in engine.num_cols if any(k in c.lower() for k in ['revenue', 'sales', 'amount', 'total', 'price'])]
+                cost_cands = [c for c in engine.num_cols if any(k in c.lower() for k in ['cost', 'expense', 'spend', 'budget'])]
+                s_rev = rev_cands[0] if rev_cands else (engine.num_cols[0] if engine.num_cols else None)
+                s_cost = cost_cands[0] if cost_cands else None
 
-    tab_offset += 1
+                t_rev = filtered_df[s_rev].sum() if s_rev else 0.0
+                t_cost = filtered_df[s_cost].sum() if s_cost else 0.0
+                n_profit = t_rev - t_cost
+                p_margin = (n_profit / t_rev * 100) if t_rev > 0 else 0.0
 
-    # TAB 7: FASTAPI BACKEND SERVICE INTEGRATION (PHASE 3)
+                # Slide 1: Title
+                slide1 = prs.slides.add_slide(prs.slide_layouts[0])
+                slide1.shapes.title.text = "Executive Profit & Sales Intelligence Report"
+                slide1.placeholders[1].text = f"Dataset Source: {st.session_state['current_filename']}\nGenerated via Executive Data Intelligence Suite"
+
+                # Slide 2: Summary
+                slide2 = prs.slides.add_slide(prs.slide_layouts[5])
+                slide2.shapes.title.text = "1. Executive Summary & Data Integrity Audit"
+                t2 = slide2.shapes.add_table(5, 2, Inches(1.0), Inches(1.8), Inches(11.3), Inches(4.2)).table
+                t2.columns[0].width, t2.columns[1].width = Inches(4.5), Inches(6.8)
+                summary_metrics = [
+                    ("Evaluation Parameter", "Verified System Metric"),
+                    ("Total Active Records Analyzed", f"{len(filtered_df):,} rows"),
+                    ("Data Quality Health Index", f"{health_score}% (Pristine Standard)"),
+                    ("Total Missing Cells Detected", f"{missing_cells:,} cells"),
+                    ("Duplicate Row Anomalies", f"{duplicates:,} duplicate records")
+                ]
+                for r_idx, r_content in enumerate(summary_metrics):
+                    for c_idx, text in enumerate(r_content):
+                        cell = t2.cell(r_idx, c_idx)
+                        cell.text = text
+                        for p in cell.text_frame.paragraphs:
+                            p.font.size = Pt(13)
+                            if r_idx == 0: p.font.bold = True
+
+                # Slide 3: Financials
+                slide3 = prs.slides.add_slide(prs.slide_layouts[5])
+                slide3.shapes.title.text = "2. Financial & Profitability Overview"
+                t3 = slide3.shapes.add_table(5, 2, Inches(1.0), Inches(1.8), Inches(11.3), Inches(4.2)).table
+                t3.columns[0].width, t3.columns[1].width = Inches(4.5), Inches(6.8)
+                fin_metrics = [
+                    ("Financial KPI Domain", "Verified Calculation"),
+                    ("Gross Revenue / Sales", f"${t_rev:,.2f}"),
+                    ("Total Costs / Expenses", f"${t_cost:,.2f}"),
+                    ("Net Business Profit", f"${n_profit:,.2f}"),
+                    ("Net Profit Margin %", f"{p_margin:.1f}%")
+                ]
+                for r_idx, r_content in enumerate(fin_metrics):
+                    for c_idx, text in enumerate(r_content):
+                        cell = t3.cell(r_idx, c_idx)
+                        cell.text = text
+                        for p in cell.text_frame.paragraphs:
+                            p.font.size = Pt(13)
+                            if r_idx == 0: p.font.bold = True
+
+                # Slide 4: Leaderboard
+                if engine.cat_cols and engine.num_cols:
+                    slide4 = prs.slides.add_slide(prs.slide_layouts[5])
+                    slide4.shapes.title.text = "3. Business Performance Leaderboard"
+                    p_cat, p_num = engine.cat_cols[0], engine.num_cols[0]
+                    top_items = filtered_df.groupby(p_cat)[p_num].sum().nlargest(5).reset_index()
+                    t4 = slide4.shapes.add_table(len(top_items)+1, 2, Inches(1.5), Inches(1.8), Inches(10.3), Inches(4.0)).table
+                    t4.columns[0].width, t4.columns[1].width = Inches(5.0), Inches(5.3)
+                    t4.cell(0, 0).text, t4.cell(0, 1).text = f"Category ({p_cat})", f"Metric ({p_num})"
+                    for idx, row in top_items.iterrows():
+                        t4.cell(idx+1, 0).text, t4.cell(idx+1, 1).text = str(row[p_cat]), f"{row[p_num]:,.2f}"
+                    for r_idx in range(len(top_items)+1):
+                        for c_idx in range(2):
+                            cell = t4.cell(r_idx, c_idx)
+                            for p in cell.text_frame.paragraphs:
+                                p.font.size = Pt(13)
+                                if r_idx == 0: p.font.bold = True
+
+                # Slide 5: Risk Audit
+                slide5 = prs.slides.add_slide(prs.slide_layouts[1])
+                slide5.shapes.title.text = "4. Expense & Anomaly Risk Audit"
+                slide5.placeholders[1].text_frame.text = (
+                    "• Statistical Variance Auditing: Evaluated dataset distribution against standard deviation thresholds.\n"
+                    "• Outlier Detection: Isolated high-magnitude transactions for operational review.\n"
+                    "• Risk Mitigation: Ensures irregular expense spikes or unusual sales figures are audited before final reporting."
+                )
+
+                # Slide 6: Recommendations
+                slide6 = prs.slides.add_slide(prs.slide_layouts[1])
+                slide6.shapes.title.text = "5. Strategic AI Adviser & Next Steps"
+                slide6.placeholders[1].text_frame.text = (
+                    "1. Scale High-Margin Offerings: Reallocate marketing budget toward top-performing product categories.\n"
+                    "2. Cost Control & Expense Trimming: Investigate bottom-tier segments and vendor spending spikes.\n"
+                    "3. Continuous Monitoring: Establish weekly automated data health audits via the FastAPI pipeline."
+                )
+
+                pptx_buffer = io.BytesIO()
+                prs.save(pptx_buffer)
+                pptx_buffer.seek(0)
+                
+                st.balloons()
+                st.success("🎉 Boardroom Presentation Generated Successfully!")
+                st.download_button(
+                    label="📥 Download Boardroom Presentation (.pptx)",
+                    data=pptx_buffer,
+                    file_name="Boardroom_Executive_Presentation.pptx",
+                    mime="application/vnd.openxmlformats-officedocument.presentationml.presentation"
+                )
+            except Exception as e:
+                st.error(f"Failed to generate PowerPoint presentation: {e}")
+
+    # TAB 7: FASTAPI BACKEND PIPELINE
     with tab_objs[tab_offset]:
-        st.subheader("⚡ Decoupled FastAPI Enterprise Backend Execution")
-        st.caption("Transmit active datasets directly to the async FastAPI REST endpoint.")
+        tab_offset += 1
+        st.subheader("⚡ Decoupled FastAPI Neural Pipeline")
+        st.caption("Transmit active datasets directly to the asynchronous FastAPI REST backend.")
 
         if not is_backend_online:
-            st.warning("⚠️ FastAPI Server is currently offline. Start the Uvicorn server in your terminal (`uvicorn backend.app.main:app --reload --port 8000`) to enable remote API processing.")
+            st.warning("⚠️ FastAPI Server is currently offline. Start Uvicorn in your terminal (`uvicorn main:app --reload --port 8000`).")
         else:
-            if st.button("🚀 Process & Audit Dataset via FastAPI Server", type="primary"):
-                with st.spinner("Transmitting dataset payload to FastAPI REST API..."):
+            if st.button("🚀 Execute Neural Dataset Audit", type="primary"):
+                with st.spinner("⚡ Transmitting dataset payload to FastAPI REST API..."):
                     try:
-                        mime_type = "text/csv" if uploaded.name.endswith(".csv") else "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                        api_result = analyze_dataset_via_backend_api(uploaded.name, file_bytes, mime_type)
+                        file_bytes = st.session_state["raw_file_bytes"]
+                        mime_type = "text/csv" if st.session_state["current_filename"].endswith(".csv") else "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                        api_result = analyze_dataset_via_backend_api(st.session_state["current_filename"], file_bytes, mime_type)
                         st.session_state["backend_api_result"] = api_result
-                        st.success("Analysis complete from FastAPI server!")
+                        st.success("✨ Neural Audit Complete from FastAPI Server!")
                     except Exception as err:
                         st.error(f"Failed to communicate with FastAPI server: {err}")
 
         if "backend_api_result" in st.session_state:
             res = st.session_state["backend_api_result"]
             st.markdown("---")
-            st.markdown("### 📈 Backend API Response Payload")
+            st.markdown("### 📈 Backend Neural Summary")
+            
             col_a, col_b, col_c, col_d = st.columns(4)
             col_a.metric("File Name", res.get("filename", "N/A"))
             col_b.metric("Total Records", f"{res.get('records', 0):,}")
             col_c.metric("Data Fields", res.get("fields_count", 0))
-            col_d.metreic("Health Index", res.get("data_health_index", "0%")) if hasattr(col_d, 'metreic') else col_d.metric("Health Index", res.get("data_health_index", "0%"))
+            col_d.metric("Health Index", res.get("data_health_index", "0%"))
 
-            with st.expander("🔍 View Full JSON Payload"):
+            st.markdown("---")
+            st.markdown("### 🧠 Smart Executive Visual Analytics Grid")
+
+            t_col, t_num, trend_data = engine.get_smart_time_series()
+            s_cat = engine.cat_cols[0] if engine.cat_cols else None
+            s_num = engine.num_cols[0] if engine.num_cols else None
+
+            r1_col1, r1_col2 = st.columns(2)
+            with r1_col1:
+                if t_col is not None and trend_data is not None:
+                    fig_trend = px.line(trend_data, x=t_col, y=t_num, title=f"1. Smart Trend: {t_num} over {t_col}", template="plotly_dark", color_discrete_sequence=["#38bdf8"])
+                    st.plotly_chart(fig_trend, use_container_width=True)
+                elif engine.num_cols:
+                    num_field = engine.num_cols[0]
+                    fig_hist = px.histogram(filtered_df, x=num_field, title=f"1. Smart Distribution: {num_field}", template="plotly_dark", color_discrete_sequence=["#38bdf8"])
+                    st.plotly_chart(fig_hist, use_container_width=True)
+
+            with r1_col2:
+                if s_cat and s_num:
+                    grouped_cat = filtered_df.groupby(s_cat)[s_num].sum().nlargest(8).reset_index()
+                    fig_smart_cat = px.bar(grouped_cat, x=s_cat, y=s_num, title=f"2. Smart Performance: Total {s_num} by {s_cat}", template="plotly_dark", color_discrete_sequence=["#14b8a6"])
+                    st.plotly_chart(fig_smart_cat, use_container_width=True)
+                elif s_cat:
+                    cat_counts = filtered_df[s_cat].value_counts().head(8).reset_index()
+                    cat_counts.columns = [s_cat, "Count"]
+                    fig_cat = px.bar(cat_counts, x=s_cat, y="Count", title=f"2. Volume Breakdown by {s_cat}", template="plotly_dark", color_discrete_sequence=["#14b8a6"])
+                    st.plotly_chart(fig_cat, use_container_width=True)
+
+            r2_col1, r2_col2 = st.columns(2)
+            with r2_col1:
+                if len(engine.num_cols) >= 2:
+                    num1, num2 = engine.num_cols[0], engine.num_cols[1]
+                    fig_scatter = px.scatter(filtered_df, x=num1, y=num2, title=f"3. Correlation Analysis: {num1} vs {num2}", template="plotly_dark", color_discrete_sequence=["#f43f5e"])
+                    st.plotly_chart(fig_scatter, use_container_width=True)
+                elif engine.num_cols:
+                    num1 = engine.num_cols[0]
+                    fig_box = px.box(filtered_df, y=num1, title=f"3. Outlier Variance Map: {num1}", template="plotly_dark", color_discrete_sequence=["#f43f5e"])
+                    st.plotly_chart(fig_box, use_container_width=True)
+
+            with r2_col2:
+                if s_cat and s_num:
+                    grouped_h = filtered_df.groupby(s_cat)[s_num].mean().nlargest(8).reset_index()
+                    fig_h = px.bar(grouped_h, x=s_num, y=s_cat, orientation="h", title=f"4. Average {s_num} across {s_cat}", template="plotly_dark", color_discrete_sequence=["#a855f7"])
+                    fig_h.update_yaxes(autorange="reversed")
+                    st.plotly_chart(fig_h, use_container_width=True)
+
+            with st.expander("🔍 View Raw JSON Backend Response"):
                 st.json(res)
-
-if __name__ == "__main__":
-    main()
+else:
+    st.markdown("""
+        <div style='text-align: center; padding: 60px; background: rgba(15, 23, 42, 0.6); border-radius: 20px; border: 2px dashed #38bdf8; margin-top: 40px; box-shadow: 0 0 20px rgba(56, 189, 248, 0.1);'>
+            <h2 style='color: #38bdf8; margin-bottom: 8px;'>📂 Ready for Action</h2>
+            <p style='color: #94a3b8; font-size: 1.1rem;'>Drop your dataset above to launch your high-velocity executive command center.</p>
+        </div>
+    """, unsafe_allow_html=True)
