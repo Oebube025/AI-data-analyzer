@@ -145,7 +145,9 @@ class BusinessDataEngine:
             try:
                 temp_df = active_df.copy()
                 temp_df[d_col] = pd.to_datetime(temp_df[d_col], errors='coerce')
-                temp_df = temp_df.dropna(subset=[d_col])
+                temp_df = temp_df.dropna(subset=[d_col, n_col])
+                # Ensure values are numeric and aggregate duplicates by date
+                temp_df[n_col] = pd.to_numeric(temp_df[n_col], errors='coerce')
                 trend = temp_df.groupby(d_col)[n_col].sum().reset_index().sort_values(d_col)
                 if len(trend) > 1:
                     return d_col, n_col, trend
