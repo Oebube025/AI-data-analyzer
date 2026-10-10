@@ -1,13 +1,15 @@
 """
-Executive Data Intelligence Suite (Cohere AI Engine)
-Phase 2 Upgrade: Global Filter Bar, Multi-Step Transformation Stack, & Automated PowerPoint Deck Export.
+Executive Data Intelligence Suite (Cohere AI Engine & FastAPI Backend Integration)
+Phase 3 Decoupled Client — Includes Autonomous AI Dashboard Orchestrator.
 To run locally: streamlit run App1.py
 """
 
 import io
 import os
 import time
+import json
 import hashlib
+import requests
 import numpy as np
 import pandas as pd
 import plotly.express as px
@@ -16,6 +18,28 @@ import cohere
 from pptx import Presentation
 from pptx.util import Inches, Pt
 from pptx.dml.color import RGBColor
+
+# ----------------------------------------------------------------------
+# FastAPI Backend Configuration
+# ----------------------------------------------------------------------
+BACKEND_URL = "http://127.0.0.1:8000"
+
+def check_backend_health() -> bool:
+    """Verifies connection with the FastAPI server."""
+    try:
+        res = requests.get(f"{BACKEND_URL}/", timeout=2)
+        return res.status_code == 200
+    except Exception:
+        return False
+
+def analyze_dataset_via_backend_api(file_name: str, file_bytes: bytes, file_type: str) -> dict:
+    """Sends uploaded dataset payload to FastAPI backend for analysis."""
+    files = {"file": (file_name, file_bytes, file_type)}
+    response = requests.post(f"{BACKEND_URL}/api/v1/analyze-file", files=files, timeout=10)
+    if response.status_code == 200:
+        return response.json()
+    else:
+        raise ValueError(f"Backend API error: {response.status_code}")
 
 # ----------------------------------------------------------------------
 # Page Configuration & Executive Styling
@@ -87,10 +111,9 @@ def list_sheets(file_bytes: bytes):
     return pd.ExcelFile(io.BytesIO(file_bytes)).sheet_names
 
 # ----------------------------------------------------------------------
-# PowerPoint Presentation Export Generator (Phase 2 Feature)
+# PowerPoint Presentation Export Generator
 # ----------------------------------------------------------------------
 def generate_pptx_deck(metrics: dict, field_inventory: pd.DataFrame, briefing_text: str = "") -> bytes:
-    """Compiles key dashboard metrics and AI briefing into an executive PowerPoint (.pptx) deck."""
     prs = Presentation()
     
     # Slide 1: Title Slide
@@ -259,6 +282,58 @@ Focus Field: {self.focus_field if self.focus_field else "General Performance Aud
         except Exception as e:
             return f"⚠️ Unable to generate briefing. Details: {str(e)}"
 
+    def generate_orchestrator_blueprint(self, api_key: str, selected_model: str) -> dict:
+        """Asks Cohere to analyze schema profile and return a clean JSON dashboard blueprint."""
+        co = cohere.ClientV2(api_key=api_key)
+        
+        profile = {
+            "columns": list(self.df.columns),
+            "dtypes": {col: str(t) for col, t in self.df.dtypes.items()},
+            "categorical_columns": self.cat_cols,
+            "numeric_columns": self.num_cols,
+            "total_rows": len(self.df)
+        }
+
+        prompt = f"""
+You are an autonomous Master BI Orchestrator Agent. Analyze this dataset profile and return a dashboard blueprint strictly in valid JSON format (no markdown code blocks, just raw JSON).
+
+Dataset Profile:
+{profile}
+
+JSON Structure Required:
+{{
+  "dashboard_title": "Suggested Executive Dashboard Title",
+  "recommended_focus_metric": "Name of the most important numeric column",
+  "recommended_category_dimension": "Name of the best categorical column",
+  "key_insight": "A 2-sentence summary of what this dataset appears to track.",
+  "suggested_charts": [
+    {{"type": "bar", "x": "column_name", "y": "column_name", "title": "Chart Title"}},
+    {{"type": "histogram", "x": "column_name", "title": "Distribution Title"}}
+  ]
+}}
+"""
+        try:
+            response = co.chat(
+                model=selected_model,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.1
+            )
+            raw_text = response.message.content[0].text.strip()
+            # Clean potential markdown wrapping
+            if raw_text.startswith("```"):
+                raw_text = raw_text.split("```")[1]
+                if raw_text.startswith("json"):
+                    raw_text = raw_text[4:]
+            return json.loads(raw_text.strip())
+        except Exception as e:
+            return {
+                "dashboard_title": "Autonomous Executive Dashboard",
+                "recommended_focus_metric": self.num_cols[0] if self.num_cols else "N/A",
+                "recommended_category_dimension": self.cat_cols[0] if self.cat_cols else "N/A",
+                "key_insight": f"Fallback blueprint generated due to parsing error: {str(e)}",
+                "suggested_charts": []
+            }
+
     def execute_nl_pandas_query(self, api_key: str, selected_model: str, user_query: str) -> tuple[str, str, dict]:
         co = cohere.ClientV2(api_key=api_key)
         schema_info = {col: str(dtype) for col, dtype in zip(self.df.columns, self.df.dtypes)}
@@ -305,12 +380,24 @@ Rules:
             return "Unable to execute query.", "# Execution error", provenance
 
 # ----------------------------------------------------------------------
-# Streamlit Interface
+# Streamlit Application
 # ----------------------------------------------------------------------
 def main():
     st.title("💼 Executive Data Intelligence Suite")
-    st.caption("Powered by Cohere Enterprise AI Models with Interactive Global Filtering")
+    st.caption("Phase 3 Decoupled Client — Integrated with Autonomous BI Orchestrator & FastAPI")
     st.markdown("---")
+
+    # Sidebar: System Status & Settings
+    with st.sidebar:
+        st.markdown("### 🔌 System Connectivity")
+        is_backend_online = check_backend_health()
+        if is_backend_online:
+            st.success("🟢 FastAPI Backend: Online")
+            st.caption(f"Connected to `{BACKEND_URL}`")
+        else:
+            st.warning("🟡 Local Mode (FastAPI Offline)")
+
+        st.markdown("---")
 
     uploaded = st.file_uploader("📂 Upload Business Files (.csv or .xlsx)", type=["csv", "xlsx", "xls", "parquet"])
     
@@ -332,10 +419,12 @@ def main():
             loaded_df = load_data(file_bytes, uploaded.name, sheet)
             st.session_state["original_df"] = loaded_df.copy()
             st.session_state["current_df"] = loaded_df.copy()
-            st.session_state["transformation_stack"] = []  # Multi-step undo stack (Phase 2)
+            st.session_state["transformation_stack"] = []
             st.session_state["dataset_hash"] = current_hash
             st.session_state.pop("ai_briefing", None)
+            st.session_state.pop("orchestrator_blueprint", None)
             st.session_state.pop("last_answer", None)
+            st.session_state.pop("backend_api_result", None)
         except Exception as e:
             st.error(f"Error loading business file: {e}")
             return
@@ -346,9 +435,7 @@ def main():
         st.warning("The uploaded file contains no active data records.")
         return
 
-    # ------------------------------------------------------------------
-    # PHASE 2 FEATURE 1: Interactive Global Filter Bar
-    # ------------------------------------------------------------------
+    # Interactive Global Filter Bar
     with st.expander("🔍 Interactive Global Filters (Applies Across All Tabs)", expanded=False):
         f_cols = st.columns(3)
         filtered_df = raw_df.copy()
@@ -377,7 +464,7 @@ def main():
             st.markdown("<br>", unsafe_allow_html=True)
             st.caption(f"**Filtered Output:** {len(filtered_df):,} of {len(raw_df):,} rows")
 
-    df = filtered_df  # Dynamic views use filtered_df
+    df = filtered_df
 
     with st.sidebar:
         st.markdown("### ⚙️ Analysis Settings")
@@ -392,10 +479,8 @@ def main():
             for idx, action in enumerate(stack, 1):
                 st.text(f"{idx}. {action}")
             
-            # Phase 2 Feature: Multi-step Undo
             if st.button("⏪ Undo Last Transformation", use_container_width=True):
                 st.session_state["transformation_stack"].pop()
-                # Replay stack from original_df
                 temp_df = st.session_state["original_df"].copy()
                 st.session_state["current_df"] = temp_df
                 st.rerun()
@@ -406,20 +491,79 @@ def main():
             st.session_state["current_df"] = st.session_state["original_df"].copy()
             st.session_state["transformation_stack"] = []
             st.session_state.pop("ai_briefing", None)
+            st.session_state.pop("orchestrator_blueprint", None)
             st.success("Dataset restored!")
             st.rerun()
 
     engine = BusinessDataEngine(df, focus_field)
 
-    tabs = ["📈 Executive Dashboard", "🧹 Data Refinement", "📊 Metric Visualizations", "⚠️ Anomaly Audit"]
+    tabs = ["🤖 Autonomous AI Agent", "📈 Executive Dashboard", "🧹 Data Refinement", "📊 Metric Visualizations", "⚠️ Anomaly Audit"]
     if focus_field:
         tabs.append("🎯 Focus Field Drilldown")
     tabs.append("🤖 AI Executive Briefing & Export")
+    tabs.append("⚡ FastAPI Backend Pipeline")
 
     tab_objs = st.tabs(tabs)
 
-    # TAB 1: DASHBOARD
+    # TAB 1: AUTONOMOUS AI AGENT ORCHESTRATOR
     with tab_objs[0]:
+        st.subheader("🤖 Autonomous BI Orchestrator Agent")
+        st.caption("Drop your data and let Cohere automatically inspect schema profiles, discover key metrics, and build your custom dashboard blueprint.")
+
+        cohere_api_key = get_cohere_api_key()
+        if not cohere_api_key:
+            cohere_api_key = st.text_input("Enter Cohere API Key:", type="password", key="agent_key")
+
+        if cohere_api_key:
+            selected_model = st.selectbox("Select Orchestrator Model", ["command-a-03-2025", "command-r-plus-08-2024", "command-r-08-2024"], key="agent_model")
+            
+            if st.button("🚀 Run Autonomous Dashboard Orchestrator", type="primary"):
+                with st.spinner("Agent is analyzing schema profile and building dashboard layout..."):
+                    blueprint = engine.generate_orchestrator_blueprint(api_key=cohere_api_key, selected_model=selected_model)
+                    st.session_state["orchestrator_blueprint"] = blueprint
+
+        if "orchestrator_blueprint" in st.session_state:
+            bp = st.session_state["orchestrator_blueprint"]
+            st.markdown("---")
+            st.markdown(f"### ✨ {bp.get('dashboard_title', 'Executive Dashboard')}")
+            st.info(f"💡 **AI Orchestrator Insight:** {bp.get('key_insight', '')}")
+
+            # Render Recommended KPIs
+            metrics = engine.executive_metrics()
+            cols = st.columns(len(metrics))
+            for col, (label, val) in zip(cols, metrics.items()):
+                col.metric(label, val)
+
+            st.markdown("---")
+            st.markdown("### 📊 Agent-Recommended Visualizations")
+            
+            rec_cat = bp.get("recommended_category_dimension")
+            rec_num = bp.get("recommended_focus_metric")
+
+            c_cols = st.columns(2)
+            with c_cols[0]:
+                if rec_cat and rec_cat in df.columns and rec_num and rec_num in df.columns:
+                    grouped_df = df.groupby(rec_cat)[rec_num].sum().reset_index().nlargest(10, rec_num)
+                    fig = px.bar(grouped_df, x=rec_cat, y=rec_num, title=f"Top {rec_cat} by {rec_num}", template="plotly_dark", color_discrete_sequence=["#38bdf8"])
+                    st.plotly_chart(fig, use_container_width=True)
+                elif engine.cat_cols and engine.num_cols:
+                    fallback_cat = engine.cat_cols[0]
+                    fallback_num = engine.num_cols[0]
+                    grouped_df = df.groupby(fallback_cat)[fallback_num].sum().reset_index().nlargest(10, fallback_num)
+                    fig = px.bar(grouped_df, x=fallback_cat, y=fallback_num, title=f"Top {fallback_cat} by {fallback_num}", template="plotly_dark", color_discrete_sequence=["#38bdf8"])
+                    st.plotly_chart(fig, use_container_width=True)
+
+            with c_cols[1]:
+                if rec_num and rec_num in df.columns:
+                    fig_hist = px.histogram(df, x=rec_num, title=f"Distribution of {rec_num}", template="plotly_dark", color_discrete_sequence=["#14b8a6"])
+                    st.plotly_chart(fig_hist, use_container_width=True)
+                elif engine.num_cols:
+                    fallback_num = engine.num_cols[0]
+                    fig_hist = px.histogram(df, x=fallback_num, title=f"Distribution of {fallback_num}", template="plotly_dark", color_discrete_sequence=["#14b8a6"])
+                    st.plotly_chart(fig_hist, use_container_width=True)
+
+    # TAB 2: DASHBOARD
+    with tab_objs[1]:
         st.subheader("Key Data Health Metrics")
         metrics = engine.executive_metrics()
         cols = st.columns(len(metrics))
@@ -436,8 +580,8 @@ def main():
             st.subheader("Field Inventory")
             st.dataframe(engine.field_inventory(), use_container_width=True, hide_index=True)
 
-    # TAB 2: DATA REFINEMENT WITH TRANSFORMATION STACK
-    with tab_objs[1]:
+    # TAB 3: DATA REFINEMENT
+    with tab_objs[2]:
         st.subheader("🧹 Interactive Data Refinement & Cleanup")
         c1, c2 = st.columns(2)
         with c1:
@@ -510,8 +654,8 @@ def main():
             excel_buffer.seek(0)
             st.download_button("📥 Download Refined Excel", data=excel_buffer.getvalue(), file_name="refined_data.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
 
-    # TAB 3: VISUALIZATIONS
-    with tab_objs[2]:
+    # TAB 4: VISUALIZATIONS
+    with tab_objs[3]:
         st.subheader("📊 Business Data Explorers")
         v1, v2 = st.columns(2)
         with v1:
@@ -527,8 +671,8 @@ def main():
                 fig_cat.update_yaxes(autorange="reversed")
                 st.plotly_chart(fig_cat)
 
-    # TAB 4: ANOMALIES
-    with tab_objs[3]:
+    # TAB 5: ANOMALIES
+    with tab_objs[4]:
         st.subheader("⚠️ Anomaly & Risk Audit")
         if engine.num_cols:
             anomalies = engine.detect_anomalies()
@@ -541,7 +685,7 @@ def main():
         else:
             st.info("No numerical metric fields available for anomaly detection.")
 
-    tab_offset = 4
+    tab_offset = 5
     if focus_field:
         with tab_objs[tab_offset]:
             st.subheader(f"🎯 KPI Drilldown: {focus_field}")
@@ -553,14 +697,14 @@ def main():
                 st.plotly_chart(px.bar(counts, x=focus_field, y="Count", title=f"Volume: {focus_field}", template="plotly_dark"))
         tab_offset += 1
 
-    # TAB 5: COHERE AI EXECUTIVE BRIEFING & POWERPOINT EXPORT
+    # TAB 6: COHERE AI EXECUTIVE BRIEFING & EXPORT
     with tab_objs[tab_offset]:
         st.subheader("🤖 Grounded AI Briefing & Executive Presentation Deck Export")
         cohere_api_key = get_cohere_api_key()
 
         if not cohere_api_key:
             st.error("🔑 Cohere API Key Missing: Configure `COHERE_API_KEY` in Secrets or Environment.")
-            cohere_api_key = st.text_input("Enter key manually:", type="password")
+            cohere_api_key = st.text_input("Enter key manually:", type="password", key="briefing_key")
 
         if cohere_api_key:
             cohere_models = [
@@ -569,7 +713,7 @@ def main():
                 "command-r-08-2024",
                 "command-r7b-12-2024"
             ]
-            selected_model = st.selectbox("Select Cohere Model", cohere_models)
+            selected_model = st.selectbox("Select Cohere Model", cohere_models, key="briefing_model")
 
             if st.button("🚀 Generate Executive Briefing", type="primary"):
                 with st.spinner("Calculating facts & querying Cohere AI..."):
@@ -580,7 +724,6 @@ def main():
             st.markdown("---")
             st.markdown(st.session_state["ai_briefing"])
             
-            # Phase 2 Feature: Download PowerPoint Deck
             st.markdown("### 📊 Export Executive Presentation Deck")
             pptx_bytes = generate_pptx_deck(
                 metrics=engine.executive_metrics(),
@@ -620,6 +763,39 @@ def main():
                     st.code(st.session_state["sandbox_code"], language="python")
                     st.markdown("**Execution Audit & Provenance:**")
                     st.json(st.session_state["sandbox_provenance"])
+
+    tab_offset += 1
+
+    # TAB 7: FASTAPI BACKEND SERVICE INTEGRATION (PHASE 3)
+    with tab_objs[tab_offset]:
+        st.subheader("⚡ Decoupled FastAPI Enterprise Backend Execution")
+        st.caption("Transmit active datasets directly to the async FastAPI REST endpoint.")
+
+        if not is_backend_online:
+            st.warning("⚠️ FastAPI Server is currently offline. Start the Uvicorn server in your terminal (`uvicorn backend.app.main:app --reload --port 8000`) to enable remote API processing.")
+        else:
+            if st.button("🚀 Process & Audit Dataset via FastAPI Server", type="primary"):
+                with st.spinner("Transmitting dataset payload to FastAPI REST API..."):
+                    try:
+                        mime_type = "text/csv" if uploaded.name.endswith(".csv") else "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                        api_result = analyze_dataset_via_backend_api(uploaded.name, file_bytes, mime_type)
+                        st.session_state["backend_api_result"] = api_result
+                        st.success("Analysis complete from FastAPI server!")
+                    except Exception as err:
+                        st.error(f"Failed to communicate with FastAPI server: {err}")
+
+        if "backend_api_result" in st.session_state:
+            res = st.session_state["backend_api_result"]
+            st.markdown("---")
+            st.markdown("### 📈 Backend API Response Payload")
+            col_a, col_b, col_c, col_d = st.columns(4)
+            col_a.metric("File Name", res.get("filename", "N/A"))
+            col_b.metric("Total Records", f"{res.get('records', 0):,}")
+            col_c.metric("Data Fields", res.get("fields_count", 0))
+            col_d.metreic("Health Index", res.get("data_health_index", "0%")) if hasattr(col_d, 'metreic') else col_d.metric("Health Index", res.get("data_health_index", "0%"))
+
+            with st.expander("🔍 View Full JSON Payload"):
+                st.json(res)
 
 if __name__ == "__main__":
     main()
