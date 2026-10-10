@@ -17,7 +17,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# CLEAN, TRUSTWORTHY EXECUTIVE CSS (Replacing arcade neon with board-room styling)
+# CLEAN, TRUSTWORTHY EXECUTIVE CSS (Boardroom slate-navy styling)
 st.markdown("""
 <style>
     /* Global Corporate Dark Theme */
@@ -135,25 +135,23 @@ class BusinessDataEngine:
             issues.append(f"Detected {duplicates:,} fully duplicated row records.")
         return round(health_score, 1), missing_cells, duplicates, issues
 
-    def get_smart_time_series(self, active_df: pd.DataFrame):
+    def get_smart_time_series(self, active_df: pd.DataFrame, metric_col: str):
         date_candidates = [col for col in active_df.columns if any(k in col.lower() for k in ['date', 'time', 'year', 'month', 'period', 'created'])]
         if not date_candidates and self.date_cols:
             date_candidates = self.date_cols
-        if date_candidates and self.num_cols:
+        if date_candidates and metric_col in active_df.columns:
             d_col = date_candidates[0]
-            n_col = self.num_cols[0]
             try:
                 temp_df = active_df.copy()
                 temp_df[d_col] = pd.to_datetime(temp_df[d_col], errors='coerce')
-                temp_df = temp_df.dropna(subset=[d_col, n_col])
-                # Ensure values are numeric and aggregate duplicates by date
-                temp_df[n_col] = pd.to_numeric(temp_df[n_col], errors='coerce')
-                trend = temp_df.groupby(d_col)[n_col].sum().reset_index().sort_values(d_col)
+                temp_df = temp_df.dropna(subset=[d_col, metric_col])
+                temp_df[metric_col] = pd.to_numeric(temp_df[metric_col], errors='coerce')
+                trend = temp_df.groupby(d_col)[metric_col].sum().reset_index().sort_values(d_col)
                 if len(trend) > 1:
-                    return d_col, n_col, trend
+                    return d_col, trend
             except Exception:
                 pass
-        return None, None, None
+        return None, None
 
 # SILENT BACKGROUND STATUS CHECK
 is_backend_online = check_backend_status()
@@ -197,7 +195,6 @@ if uploaded is not None:
         filter_cat_col = st.sidebar.selectbox("Filter Category", ["None"] + engine.cat_cols)
         if filter_cat_col != "None":
             unique_vals = df[filter_cat_col].dropna().unique().tolist()
-            # Review Fix: Default to all values so filters don't silently hide data
             selected_vals = st.sidebar.multiselect(f"Select {filter_cat_col}", unique_vals, default=unique_vals)
             if selected_vals:
                 filtered_df = filtered_df[filtered_df[filter_cat_col].isin(selected_vals)]
@@ -280,9 +277,9 @@ if uploaded is not None:
         p4.metric("Profit Margin", f"{profit_margin:.1f}%")
 
         st.markdown("---")
-        t_col, _, trend_data = engine.get_smart_time_series(filtered_df)
+        t_col, trend_data = engine.get_smart_time_series(filtered_df, sel_rev)
         if t_col is not None and trend_data is not None:
-            fig_trend = px.line(trend_data, x=t_col, y=sel_rev, title=f"Sales Trend over {t_col}", template="plotly_dark", color_discrete_sequence=["#2563eb"])
+            fig_trend = px.line(trend_data, x=t_col, y=sel_rev, title=f"Trend of {sel_rev} over {t_col}", template="plotly_dark", color_discrete_sequence=["#2563eb"])
             st.plotly_chart(fig_trend, use_container_width=True)
         else:
             fig_hist = px.histogram(filtered_df, x=sel_rev, title=f"Distribution of {sel_rev}", template="plotly_dark", color_discrete_sequence=["#2563eb"])
@@ -337,7 +334,6 @@ if uploaded is not None:
             anomaly_metric = st.selectbox("Select Audit Metric", engine.num_cols)
             series = filtered_df[anomaly_metric].dropna()
             
-            # Review Fix: Use robust IQR method instead of strict bell-curve sigma
             Q1 = series.quantile(0.25)
             Q3 = series.quantile(0.75)
             IQR = Q3 - Q1
@@ -358,7 +354,6 @@ if uploaded is not None:
         if st.button("Generate PowerPoint Presentation (.pptx)", type="primary"):
             try:
                 prs = Presentation()
-                # Review Fix: Set slide width correctly for standard widescreen decks
                 prs.slide_width = Inches(13.333)
                 prs.slide_height = Inches(7.5)
                 
@@ -367,7 +362,6 @@ if uploaded is not None:
                 rev_cands = [c for c in engine.num_cols if any(k in c.lower() for k in ['revenue', 'sales', 'amount', 'total', 'price'])]
                 cost_cands = [c for c in engine.num_cols if any(k in c.lower() for k in ['cost', 'expense', 'spend', 'budget'])]
                 
-                # Review Fix: Respect user selections from dashboard rather than hardcoded metrics
                 s_rev = sel_rev if 'sel_rev' in locals() and sel_rev in engine.num_cols else (rev_cands[0] if rev_cands else engine.num_cols[0])
                 s_cost = sel_cost if 'sel_cost' in locals() and sel_cost != "None" else (cost_cands[0] if cost_cands else None)
 
