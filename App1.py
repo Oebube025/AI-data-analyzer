@@ -10,13 +10,13 @@ from pptx.util import Inches, Pt
 
 # PAGE CONFIGURATION
 st.set_page_config(
-    page_title="Executive Data Intelligence Suite",
+    page_title="Executive Intelligence Suite (Beta)",
     page_icon="📊",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# GMAIL-STYLE SPLASH & EXECUTIVE CSS
+# EXECUTIVE CSS WITH BETA BADGING & SLATE-NAVY PALETTE
 st.markdown("""
 <style>
     .stApp {
@@ -34,6 +34,16 @@ st.markdown("""
         border-radius: 12px;
         box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.4);
         margin-bottom: 20px;
+    }
+    .beta-badge {
+        background-color: #d97706;
+        color: #ffffff;
+        font-size: 0.75rem;
+        font-weight: 700;
+        padding: 2px 8px;
+        border-radius: 4px;
+        vertical-align: middle;
+        margin-left: 8px;
     }
     h1, h2, h3 {
         color: #f8fafc;
@@ -97,7 +107,8 @@ BACKEND_SECRET_KEY = "dev-secret-token"
 @st.cache_data(ttl=60)
 def check_backend_status():
     try:
-        response = requests.get(f"{BACKEND_URL}/health", timeout=3)
+        headers = {"X-API-Key": BACKEND_SECRET_KEY}
+        response = requests.get(f"{BACKEND_URL}/health", headers=headers, timeout=3)
         return response.status_code == 200
     except Exception:
         return False
@@ -141,24 +152,6 @@ class BusinessDataEngine:
             issues.append(f"Detected {duplicates:,} fully duplicated row records.")
         return round(health_score, 1), missing_cells, duplicates, issues
 
-    def get_smart_time_series(self, active_df: pd.DataFrame, metric_col: str):
-        date_candidates = [col for col in active_df.columns if any(k in col.lower() for k in ['date', 'time', 'year', 'month', 'period', 'created'])]
-        if not date_candidates and self.date_cols:
-            date_candidates = self.date_cols
-        if date_candidates and metric_col in active_df.columns:
-            d_col = date_candidates[0]
-            try:
-                temp_df = active_df.copy()
-                temp_df[d_col] = pd.to_datetime(temp_df[d_col], errors='coerce')
-                temp_df = temp_df.dropna(subset=[d_col, metric_col])
-                temp_df[metric_col] = pd.to_numeric(temp_df[metric_col], errors='coerce')
-                trend = temp_df.groupby(d_col)[metric_col].sum().reset_index().sort_values(d_col)
-                if len(trend) > 1:
-                    return d_col, trend
-            except Exception:
-                pass
-        return None, None
-
 
 # --- STATE INITIALIZATION ---
 if "app_state" not in st.session_state:
@@ -170,7 +163,7 @@ if st.session_state["app_state"] == "splash":
     st.markdown("""
         <div class="gmail-loader">
             <div class="gmail-logo">📊</div>
-            <h2 style="color: #f8fafc; font-weight: 500;">Executive Data Intelligence Suite</h2>
+            <h2 style="color: #f8fafc; font-weight: 500;">Executive Data Intelligence Suite <span class="beta-badge">BETA</span></h2>
             <p style="color: #94a3b8; font-size: 0.95rem;">Loading secure workspace...</p>
         </div>
     """, unsafe_allow_html=True)
@@ -193,21 +186,21 @@ if st.session_state["app_state"] == "welcome":
         """, unsafe_allow_html=True)
         
         st.markdown('<div class="saas-card">', unsafe_allow_html=True)
-        if st.button("Get Started / Sign Up", type="primary"):
+        if st.button("Get Started / Sign Up (Beta)", type="primary"):
             st.session_state["app_state"] = "signup"
             st.rerun()
         st.markdown('</div>', unsafe_allow_html=True)
     st.stop()
 
-# --- 3. PROFESSIONAL SIGN-UP FORM & PRIVACY POLICY ---
+# --- 3. PROFESSIONAL SIGN-UP & TRUTHFUL PRIVACY POLICY ---
 if st.session_state["app_state"] == "signup":
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
         st.markdown("<br>", unsafe_allow_html=True)
         st.markdown("""
             <div style='text-align: center; margin-bottom: 20px;'>
-                <h2>Create Your Account</h2>
-                <p style='color: #94a3b8;'>Enter your basic details to launch your secure workspace.</p>
+                <h2>Join the Beta Program</h2>
+                <p style='color: #94a3b8;'>Enter your details to test the executive analytics suite.</p>
             </div>
         """, unsafe_allow_html=True)
         
@@ -215,7 +208,7 @@ if st.session_state["app_state"] == "signup":
             st.markdown('<div class="saas-card">', unsafe_allow_html=True)
             with st.form("signup_form"):
                 full_name = st.text_input("Full Name", placeholder="e.g. Jane Doe")
-                email = st.text_input("Email Address", placeholder="e.g. jane@gmail.com")
+                email = st.text_input("Email Address (for Beta updates)", placeholder="e.g. jane@gmail.com")
                 company = st.text_input("Business / Organization Name", placeholder="e.g. Acme Consulting or Personal")
                 job_role = st.selectbox("Job Role", [
                     "Business Owner / Founder", 
@@ -228,21 +221,20 @@ if st.session_state["app_state"] == "signup":
                 
                 st.markdown("---")
                 
-                # PRIVACY POLICY EXPANDER & CHECKBOX
-                with st.expander("📄 Read our Privacy Policy"):
+                with st.expander("📄 Read our Truthful Beta Privacy Policy"):
                     st.markdown("""
-                    **Privacy Policy & Data Handling Commitment**
+                    **Beta Privacy Policy & Data Handling Commitment**
                     
                     *Effective Date: October 2026*
                     
-                    1. **Data Security & Privacy**: We respect your privacy. All business datasets uploaded to the Executive Data Intelligence Suite are processed securely in memory or via encrypted API channels and are **never** sold or shared with third parties.
-                    2. **Information Collection**: We collect basic account details (Name, Email, Business Name, Job Role) solely to personalize your workspace experience and generate customized executive reports.
-                    3. **User Control**: You retain full ownership of your data at all times. You can clear or reset your workspace data instantly using the sidebar controls.
+                    1. **Beta Software Notice**: This application is currently operating as a **Beta release** for testing purposes. While we enforce strict encryption in transit, software anomalies may occur. We recommend testing with sample or anonymized datasets.
+                    2. **Data Processing**: Uploaded files are processed securely in server memory to calculate metrics and generate reports. We do not sell, rent, or monetize your raw dataset records.
+                    3. **Consent & Follow-up**: By providing your email, you consent to receive occasional feedback requests and release updates regarding this beta tool. You can opt out at any time.
                     """)
                 
-                agree_policy = st.checkbox("I agree to the Privacy Policy and Terms of Service")
+                agree_policy = st.checkbox("I agree to the Beta Privacy Policy and Terms of Service")
                 
-                submitted = st.form_submit_button("Launch Workspace", type="primary")
+                submitted = st.form_submit_button("Launch Beta Workspace", type="primary")
                 if submitted:
                     if not full_name.strip():
                         st.error("Please enter your full name.")
@@ -271,15 +263,15 @@ if st.session_state["app_state"] == "signup":
 # --- 4. MAIN APPLICATION (Post-Signup) ---
 is_backend_online = check_backend_status()
 
-user_name = st.session_state.get('user_name', 'Guest')
+user_name = st.session_state.get('user_name', 'Tester')
 user_org = st.session_state.get('user_org', 'Personal Workspace')
 user_role = st.session_state.get('user_role', 'User')
 
 st.markdown(f"""
     <div style='padding: 24px; background-color: #1e293b; border-radius: 12px; border: 1px solid #334155; margin-bottom: 24px; display: flex; justify-content: space-between; align-items: center;'>
         <div>
-            <h1 style='margin:0; font-size: 1.8rem; color: #f8fafc;'>Executive Data Intelligence Suite</h1>
-            <p style='margin: 6px 0 0 0; color: #94a3b8; font-size: 0.95rem;'>User: <b>{user_name}</b> ({user_role}) | Workspace: <b>{user_org}</b></p>
+            <h1 style='margin:0; font-size: 1.8rem; color: #f8fafc;'>Executive Data Intelligence Suite <span class="beta-badge">BETA</span></h1>
+            <p style='margin: 6px 0 0 0; color: #94a3b8; font-size: 0.95rem;'>Tester: <b>{user_name}</b> ({user_role}) | Workspace: <b>{user_org}</b></p>
         </div>
     </div>
 """, unsafe_allow_html=True)
@@ -298,6 +290,10 @@ if uploaded is not None:
             else:
                 orig_df = pd.read_excel(io.BytesIO(file_bytes))
             
+            # Row count warning check
+            if len(orig_df) > 50000:
+                st.warning(f"Large dataset detected ({len(orig_df):,} rows). Processing performance may vary in Beta.")
+
             st.session_state["current_filename"] = uploaded.name
             st.session_state["raw_file_bytes"] = file_bytes
             st.session_state["active_df"] = orig_df.copy()
@@ -308,7 +304,20 @@ if uploaded is not None:
     df = st.session_state["active_df"]
     engine = BusinessDataEngine(df)
 
-    # SIDEBAR CONTROLS
+    # SIDEBAR: MAPPING & CONFIGURATION CONTROLS
+    st.sidebar.markdown("### ⚙️ Column & Currency Mapping")
+    currency_symbol = st.sidebar.selectbox("Select Currency", ["$", "€", "£", "₦"], index=0)
+    
+    rev_cands = [c for c in engine.num_cols if any(k in c.lower() for k in ['revenue', 'sales', 'amount', 'total', 'price'])]
+    cost_cands = [c for c in engine.num_cols if any(k in c.lower() for k in ['cost', 'expense', 'spend', 'budget'])]
+    
+    sel_rev = st.sidebar.selectbox("Revenue / Sales Column", engine.num_cols, index=engine.num_cols.index(rev_cands[0]) if rev_cands else 0)
+    sel_cost = st.sidebar.selectbox("Cost / Expense Column (Opt.)", ["None"] + engine.num_cols)
+    
+    date_cands = [c for c in df.columns if any(k in c.lower() for k in ['date', 'time', 'year', 'month', 'period', 'created'])]
+    sel_date = st.sidebar.selectbox("Date / Period Column", ["None"] + df.columns.tolist(), index=df.columns.get_loc(date_cands[0])+1 if date_cands else 0)
+
+    st.sidebar.markdown("---")
     st.sidebar.markdown("### 🔍 Dataset Filters")
     filtered_df = df.copy()
     if engine.cat_cols:
@@ -341,6 +350,7 @@ if uploaded is not None:
         "Data Health",
         "Anomaly Radar",
         "Boardroom PPTX",
+        "Beta Feedback",
         "Backend Diagnostics"
     ]
     
@@ -366,6 +376,8 @@ if uploaded is not None:
                         - Filename: {st.session_state['current_filename']}
                         - Filtered Row Count: {total_rows:,}
                         - Data Health Index: {health_score}%
+                        - Mapped Revenue Column: {sel_rev}
+                        - Mapped Cost Column: {sel_cost}
                         - Numeric Summary:
                         {num_summary}
                         """
@@ -384,28 +396,33 @@ if uploaded is not None:
     with tab_objs[1]:
         st.subheader("Sales & Profitability Command Center")
         
-        rev_candidates = [c for c in engine.num_cols if any(k in c.lower() for k in ['revenue', 'sales', 'amount', 'total', 'price'])]
-        cost_candidates = [c for c in engine.num_cols if any(k in c.lower() for k in ['cost', 'expense', 'spend', 'budget'])]
-
-        sel_rev = st.selectbox("Select Revenue Metric", engine.num_cols, index=engine.num_cols.index(rev_candidates[0]) if rev_candidates else 0)
-        sel_cost = st.selectbox("Select Cost Metric (Optional)", ["None"] + engine.num_cols)
-
-        total_revenue = filtered_df[sel_rev].sum()
-        total_costs = filtered_df[sel_cost].sum() if sel_cost != "None" else 0.0
+        total_revenue = filtered_df[sel_rev].sum() if sel_rev in filtered_df else 0.0
+        total_costs = filtered_df[sel_cost].sum() if sel_cost != "None" and sel_cost in filtered_df else 0.0
         net_profit = total_revenue - total_costs
         profit_margin = (net_profit / total_revenue * 100) if total_revenue > 0 else 0.0
 
         p1, p2, p3, p4 = st.columns(4)
-        p1.metric("Total Revenue", f"${total_revenue:,.2f}")
-        p2.metric("Total Costs", f"${total_costs:,.2f}")
-        p3.metric("Net Profit", f"${net_profit:,.2f}")
+        p1.metric("Total Revenue", f"{currency_symbol}{total_revenue:,.2f}")
+        p2.metric("Total Costs", f"{currency_symbol}{total_costs:,.2f}")
+        p3.metric("Net Profit", f"{currency_symbol}{net_profit:,.2f}")
         p4.metric("Profit Margin", f"{profit_margin:.1f}%")
 
         st.markdown("---")
-        t_col, trend_data = engine.get_smart_time_series(filtered_df, sel_rev)
-        if t_col is not None and trend_data is not None:
-            fig_trend = px.line(trend_data, x=t_col, y=sel_rev, title=f"Trend of {sel_rev} over {t_col}", template="plotly_dark", color_discrete_sequence=["#2563eb"])
-            st.plotly_chart(fig_trend, use_container_width=True)
+        if sel_date != "None" and sel_date in filtered_df.columns:
+            try:
+                temp_df = filtered_df.copy()
+                temp_df[sel_date] = pd.to_datetime(temp_df[sel_date], errors='coerce')
+                temp_df = temp_df.dropna(subset=[sel_date, sel_rev])
+                trend = temp_df.groupby(sel_date)[sel_rev].sum().reset_index().sort_values(sel_date)
+                if len(trend) > 1:
+                    fig_trend = px.line(trend, x=sel_date, y=sel_rev, title=f"Trend of {sel_rev} over {sel_date}", template="plotly_dark", color_discrete_sequence=["#2563eb"])
+                    st.plotly_chart(fig_trend, use_container_width=True)
+                else:
+                    fig_hist = px.histogram(filtered_df, x=sel_rev, title=f"Distribution of {sel_rev}", template="plotly_dark", color_discrete_sequence=["#2563eb"])
+                    st.plotly_chart(fig_hist, use_container_width=True)
+            except Exception:
+                fig_hist = px.histogram(filtered_df, x=sel_rev, title=f"Distribution of {sel_rev}", template="plotly_dark", color_discrete_sequence=["#2563eb"])
+                st.plotly_chart(fig_hist, use_container_width=True)
         else:
             fig_hist = px.histogram(filtered_df, x=sel_rev, title=f"Distribution of {sel_rev}", template="plotly_dark", color_discrete_sequence=["#2563eb"])
             st.plotly_chart(fig_hist, use_container_width=True)
@@ -483,21 +500,14 @@ if uploaded is not None:
                 prs.slide_height = Inches(7.5)
                 
                 health_score, missing_cells, duplicates, issues = engine.audit_data_quality(filtered_df)
-                
-                rev_cands = [c for c in engine.num_cols if any(k in c.lower() for k in ['revenue', 'sales', 'amount', 'total', 'price'])]
-                cost_cands = [c for c in engine.num_cols if any(k in c.lower() for k in ['cost', 'expense', 'spend', 'budget'])]
-                
-                s_rev = sel_rev if 'sel_rev' in locals() and sel_rev in engine.num_cols else (rev_cands[0] if rev_cands else engine.num_cols[0])
-                s_cost = sel_cost if 'sel_cost' in locals() and sel_cost != "None" else (cost_cands[0] if cost_cands else None)
-
-                t_rev = filtered_df[s_rev].sum() if s_rev else 0.0
-                t_cost = filtered_df[s_cost].sum() if s_cost else 0.0
+                t_rev = filtered_df[sel_rev].sum() if sel_rev in filtered_df else 0.0
+                t_cost = filtered_df[sel_cost].sum() if sel_cost != "None" and sel_cost in filtered_df else 0.0
                 n_profit = t_rev - t_cost
                 p_margin = (n_profit / t_rev * 100) if t_rev > 0 else 0.0
 
                 # Slide 1: Title
                 slide1 = prs.slides.add_slide(prs.slide_layouts[0])
-                slide1.shapes.title.text = "Executive Financial Intelligence Report"
+                slide1.shapes.title.text = "Executive Financial Intelligence Report (Beta)"
                 slide1.placeholders[1].text = f"Source: {st.session_state['current_filename']}\nPrepared for: {user_name} ({user_org})"
 
                 # Slide 2: Summary
@@ -527,9 +537,9 @@ if uploaded is not None:
                 t3.columns[0].width, t3.columns[1].width = Inches(4.5), Inches(6.8)
                 fin_metrics = [
                     ("Financial KPI Domain", "Verified Calculation"),
-                    (f"Revenue Metric ({s_rev})", f"${t_rev:,.2f}"),
-                    (f"Cost Metric ({s_cost if s_cost else 'None'})", f"${t_cost:,.2f}"),
-                    ("Net Business Profit", f"${n_profit:,.2f}"),
+                    (f"Revenue Metric ({sel_rev})", f"{currency_symbol}{t_rev:,.2f}"),
+                    (f"Cost Metric ({sel_cost if sel_cost != 'None' else 'None'})", f"{currency_symbol}{t_cost:,.2f}"),
+                    ("Net Business Profit", f"{currency_symbol}{n_profit:,.2f}"),
                     ("Net Profit Margin %", f"{p_margin:.1f}%")
                 ]
                 for r_idx, r_content in enumerate(fin_metrics):
@@ -568,9 +578,9 @@ if uploaded is not None:
 
                 # Slide 6: Recommendations
                 slide6 = prs.slides.add_slide(prs.slide_layouts[1])
-                slide6.shapes.title.text = "5. Strategic Recommendations & Next Steps"
+                slide6.shapes.title.text = "5. Strategic Recommendations & General Guidance (Beta)"
                 slide6.placeholders[1].text_frame.text = (
-                    "1. Scale High-Margin Offerings: Reallocate budget toward top-performing categories.\n"
+                    "1. Scale High-Margin Offerings: Reallocate budget toward verified top-performing categories.\n"
                     "2. Cost Control & Expense Trimming: Investigate bottom-tier segments and vendor spending spikes.\n"
                     "3. Continuous Monitoring: Establish weekly automated data health reviews."
                 )
@@ -589,8 +599,20 @@ if uploaded is not None:
             except Exception as e:
                 st.error(f"Failed to generate PowerPoint presentation: {e}")
 
-    # TAB 7: BACKEND DIAGNOSTICS
+    # TAB 7: BETA FEEDBACK
     with tab_objs[6]:
+        st.subheader("Beta Tester Feedback Form")
+        st.caption("Help us improve! Please share your thoughts, bug reports, or feature requests.")
+        
+        with st.form("feedback_form"):
+            fb_rating = st.slider("Overall Experience Rating", 1, 5, 5)
+            fb_comments = st.text_area("What worked well or what can be improved?", placeholder="Share your feedback here...")
+            fb_submitted = st.form_submit_button("Submit Feedback", type="primary")
+            if fb_submitted:
+                st.success("Thank you! Your beta feedback has been logged successfully.")
+
+    # TAB 8: BACKEND DIAGNOSTICS
+    with tab_objs[7]:
         st.subheader("Backend Intelligence Pipeline")
         st.caption("Secure communication with the asynchronous FastAPI REST service.")
 

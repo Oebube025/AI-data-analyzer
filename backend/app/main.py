@@ -1,6 +1,6 @@
 """
-FastAPI Backend Core - Executive Data Intelligence Suite
-Production Version with Email OTP Authentication
+FastAPI Backend Core - Executive Data Intelligence Suite (Beta)
+Production-Ready Secure REST API
 """
 
 from fastapi import FastAPI, UploadFile, File, HTTPException, Header
@@ -10,17 +10,16 @@ import pandas as pd
 import io
 import numpy as np
 import os
-import random
 import cohere
 
 app = FastAPI(
-    title="Executive Data Intelligence Suite - Secure Backend",
-    version="3.3.0"
+    title="Executive Data Intelligence Suite - Secure Backend (Beta)",
+    version="4.0.0"
 )
 
 ALLOWED_ORIGINS = [
     "http://localhost:8501",
-    "http://127.0.0.1:8501",
+    "http://127.0.0.1:8000",
     "https://your-streamlit-app-domain.streamlit.app"
 ]
 
@@ -32,53 +31,19 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# In-memory OTP store for verification (in production, use Redis or a DB)
-OTP_STORE = {}
-
 class AIAdvisoryRequest(BaseModel):
     verified_stats: str = Field(..., max_length=5000, description="Dataset summary stats string")
 
-class SendOTPRequest(BaseModel):
-    email: str
-
-class VerifyOTPRequest(BaseModel):
-    email: str
-    code: str
-
 @app.get("/health")
 def health_check():
-    return {"status": "online", "service": "Executive BI FastAPI Backend"}
-
-@app.post("/api/auth/send-otp")
-async def send_otp(payload: SendOTPRequest):
-    """Generates and sends a 6-digit authentication code (supports any email provider)."""
-    email = payload.email.strip().lower()
-    if not email or "@" not in email:
-        raise HTTPException(status_code=400, detail="Please provide a valid email address.")
-    
-    otp_code = f"{random.randint(100000, 999999)}"
-    OTP_STORE[email] = otp_code
-    
-    # In production, integrate SendGrid or SMTP here. For prototype agility, 
-    # we return it securely or log it to server terminal.
-    print(f"\n[AUTH] Verification code for {email}: {otp_code}\n")
-    
-    return {"status": "success", "message": f"Verification code sent to {email}"}
-
-@app.post("/api/auth/verify-otp")
-async def verify_otp(payload: VerifyOTPRequest):
-    """Validates the 6-digit OTP code."""
-    email = payload.email.strip().lower()
-    code = payload.code.strip()
-    
-    if email in OTP_STORE and OTP_STORE[email] == code:
-        del OTP_STORE[email] # consume code
-        return {"status": "success", "message": "Authentication successful."}
-    
-    raise HTTPException(status_code=400, detail="Invalid or expired verification code.")
+    return {"status": "online", "service": "Executive BI FastAPI Backend (Beta)"}
 
 @app.post("/api/analyze")
-async def analyze_dataset(file: UploadFile = File(...)):
+async def analyze_dataset(file: UploadFile = File(...), x_api_key: str = Header(None)):
+    expected_token = os.getenv("BACKEND_SECRET_KEY", "dev-secret-token")
+    if x_api_key != expected_token:
+        raise HTTPException(status_code=401, detail="Unauthorized: Invalid or missing backend access token.")
+    
     try:
         contents = await file.read()
         filename = file.filename
