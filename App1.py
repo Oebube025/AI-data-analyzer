@@ -93,7 +93,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # BACKEND API CONFIGURATION (Update with your live Render URL when deployed)
-BACKEND_URL = "http://127.0.0.1:8000"
+BACKEND_URL = "https://ai-data-analyzer-1-n0an.onrender.com"
 BACKEND_SECRET_KEY = "dev-secret-token"
 
 @st.cache_data(ttl=60)
