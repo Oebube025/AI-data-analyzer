@@ -52,7 +52,6 @@ st.markdown("""
     .stButton>button:hover {
         background-color: #1d4ed8;
     }
-    /* Gmail-style pulsing loader animation */
     @keyframes gmailPulse {
         0% { transform: scale(0.95); opacity: 0.8; }
         50% { transform: scale(1.05); opacity: 1; }
@@ -92,7 +91,6 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# BACKEND API CONFIGURATION (Update with your live Render URL when deployed)
 BACKEND_URL = "https://ai-data-analyzer-1-n0an.onrender.com"
 BACKEND_SECRET_KEY = "dev-secret-token"
 
@@ -103,18 +101,6 @@ def check_backend_status():
         return response.status_code == 200
     except Exception:
         return False
-
-def api_send_otp(email: str):
-    res = requests.post(f"{BACKEND_URL}/api/auth/send-otp", json={"email": email}, timeout=10)
-    if res.status_code == 200:
-        return True
-    raise Exception(res.json().get("detail", "Failed to send OTP"))
-
-def api_verify_otp(email: str, code: str):
-    res = requests.post(f"{BACKEND_URL}/api/auth/verify-otp", json={"email": email, "code": code}, timeout=10)
-    if res.status_code == 200:
-        return True
-    raise Exception(res.json().get("detail", "Invalid verification code"))
 
 def analyze_dataset_via_backend_api(filename: str, file_bytes: bytes, mime_type: str):
     files = {"file": (filename, file_bytes, mime_type)}
@@ -176,8 +162,8 @@ class BusinessDataEngine:
 
 # --- STATE INITIALIZATION ---
 if "app_state" not in st.session_state:
-    st.session_state["app_state"] = "splash"  # splash -> welcome -> auth_input -> otp_verify -> main
-    st.session_state["auth_email"] = ""
+    st.session_state["app_state"] = "splash"
+    st.session_state["authenticated"] = False
 
 # --- 1. GMAIL-STYLE SPLASH SCREEN ---
 if st.session_state["app_state"] == "splash":
@@ -188,7 +174,7 @@ if st.session_state["app_state"] == "splash":
             <p style="color: #94a3b8; font-size: 0.95rem;">Loading secure workspace...</p>
         </div>
     """, unsafe_allow_html=True)
-    time.sleep(1.5)
+    time.sleep(1.2)
     st.session_state["app_state"] = "welcome"
     st.rerun()
 
@@ -199,57 +185,81 @@ if st.session_state["app_state"] == "welcome":
         st.markdown("<br><br>", unsafe_allow_html=True)
         st.markdown("""
             <div style='text-align: center; padding: 10px;'>
-                <h1 style='font-size: 2.5rem; color: #f8fafc;'>Instant Financial Clarity for Small Businesses & Individuals</h1>
-                <p style='color: #94a3b8; font-size: 1.1rem; margin-top: 10px; margin-bottom: 30px;'>
+                <h1 style='font-size: 2.3rem; color: #f8fafc;'>Instant Financial Clarity for Small Businesses & Individuals</h1>
+                <p style='color: #94a3b8; font-size: 1.05rem; margin-top: 10px; margin-bottom: 30px;'>
                     Transform raw CSV and Excel data into executive dashboards, anomaly alerts, and AI advisory reports in seconds.
                 </p>
             </div>
         """, unsafe_allow_html=True)
         
         st.markdown('<div class="saas-card">', unsafe_allow_html=True)
-        c_a, c_b = st.columns(2)
-        with c_a:
-            if st.button("Sign In"):
-                st.session_state["auth_mode"] = "signin"
-                st.session_state["app_state"] = "auth_input"
-                st.rerun()
-        with c_b:
-            if st.button("Create Account", type="primary"):
-                st.session_state["auth_mode"] = "signup"
-                st.session_state["app_state"] = "auth_input"
-                st.rerun()
+        if st.button("Get Started / Sign Up", type="primary"):
+            st.session_state["app_state"] = "signup"
+            st.rerun()
         st.markdown('</div>', unsafe_allow_html=True)
     st.stop()
 
-# --- 3. EMAIL INPUT & OTP TRIGGER ---
-if st.session_state["app_state"] == "auth_input":
+# --- 3. PROFESSIONAL SIGN-UP FORM & PRIVACY POLICY ---
+if st.session_state["app_state"] == "signup":
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
-        st.markdown("<br><br>", unsafe_allow_html=True)
-        st.markdown(f"""
+        st.markdown("<br>", unsafe_allow_html=True)
+        st.markdown("""
             <div style='text-align: center; margin-bottom: 20px;'>
-                <h2>{'Welcome Back' if st.session_state.get('auth_mode') == 'signin' else 'Create Your Account'}</h2>
-                <p style='color: #94a3b8;'>Enter your email (Gmail, Yahoo, Outlook, etc.) to receive your secure verification code.</p>
+                <h2>Create Your Account</h2>
+                <p style='color: #94a3b8;'>Enter your basic details to launch your secure workspace.</p>
             </div>
         """, unsafe_allow_html=True)
         
         with st.container():
             st.markdown('<div class="saas-card">', unsafe_allow_html=True)
-            with st.form("email_form"):
-                user_email = st.text_input("Email Address", placeholder="you@gmail.com")
-                submitted = st.form_submit_button("Send Verification Code", type="primary")
+            with st.form("signup_form"):
+                full_name = st.text_input("Full Name", placeholder="e.g. Jane Doe")
+                email = st.text_input("Email Address", placeholder="e.g. jane@gmail.com")
+                company = st.text_input("Business / Organization Name", placeholder="e.g. Acme Consulting or Personal")
+                job_role = st.selectbox("Job Role", [
+                    "Business Owner / Founder", 
+                    "Small Business Manager", 
+                    "Freelancer / Independent", 
+                    "Accountant / Bookkeeper", 
+                    "Data Analyst", 
+                    "Other"
+                ])
+                
+                st.markdown("---")
+                
+                # PRIVACY POLICY EXPANDER & CHECKBOX
+                with st.expander("📄 Read our Privacy Policy"):
+                    st.markdown("""
+                    **Privacy Policy & Data Handling Commitment**
+                    
+                    *Effective Date: October 2026*
+                    
+                    1. **Data Security & Privacy**: We respect your privacy. All business datasets uploaded to the Executive Data Intelligence Suite are processed securely in memory or via encrypted API channels and are **never** sold or shared with third parties.
+                    2. **Information Collection**: We collect basic account details (Name, Email, Business Name, Job Role) solely to personalize your workspace experience and generate customized executive reports.
+                    3. **User Control**: You retain full ownership of your data at all times. You can clear or reset your workspace data instantly using the sidebar controls.
+                    """)
+                
+                agree_policy = st.checkbox("I agree to the Privacy Policy and Terms of Service")
+                
+                submitted = st.form_submit_button("Launch Workspace", type="primary")
                 if submitted:
-                    if user_email and "@" in user_email:
-                        try:
-                            api_send_otp(user_email)
-                            st.session_state["auth_email"] = user_email
-                            st.session_state["app_state"] = "otp_verify"
-                            st.success("Verification code sent! Check your inbox.")
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"Error: {e}")
-                    else:
+                    if not full_name.strip():
+                        st.error("Please enter your full name.")
+                    elif not email.strip() or "@" not in email:
                         st.error("Please enter a valid email address.")
+                    elif not company.strip():
+                        st.error("Please enter your business or organization name.")
+                    elif not agree_policy:
+                        st.error("You must agree to the Privacy Policy to continue.")
+                    else:
+                        st.session_state["user_name"] = full_name.strip()
+                        st.session_state["user_email"] = email.strip()
+                        st.session_state["user_org"] = company.strip()
+                        st.session_state["user_role"] = job_role
+                        st.session_state["authenticated"] = True
+                        st.session_state["app_state"] = "main"
+                        st.rerun()
             
             if st.button("← Back to Welcome Page"):
                 st.session_state["app_state"] = "welcome"
@@ -257,47 +267,19 @@ if st.session_state["app_state"] == "auth_input":
             st.markdown('</div>', unsafe_allow_html=True)
     st.stop()
 
-# --- 4. OTP VERIFICATION SCREEN ---
-if st.session_state["app_state"] == "otp_verify":
-    col1, col2, col3 = st.columns([1, 2, 1])
-    with col2:
-        st.markdown("<br><br>", unsafe_allow_html=True)
-        st.markdown(f"""
-            <div style='text-align: center; margin-bottom: 20px;'>
-                <h2>Verify Your Email</h2>
-                <p style='color: #94a3b8;'>We've sent a 6-digit code to <b>{st.session_state['auth_email']}</b>.<br><small>(Check server terminal if running locally)</small></p>
-            </div>
-        """, unsafe_allow_html=True)
-        
-        with st.container():
-            st.markdown('<div class="saas-card">', unsafe_allow_html=True)
-            with st.form("otp_form"):
-                otp_input = st.text_input("Enter 6-Digit Code", placeholder="123456", max_chars=6)
-                verify_submitted = st.form_submit_button("Verify & Launch Suite", type="primary")
-                if verify_submitted:
-                    try:
-                        api_verify_otp(st.session_state["auth_email"], otp_input)
-                        st.session_state["authenticated"] = True
-                        st.session_state["app_state"] = "main"
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Verification failed: {e}")
-            
-            if st.button("← Resend Code / Change Email"):
-                st.session_state["app_state"] = "auth_input"
-                st.rerun()
-            st.markdown('</div>', unsafe_allow_html=True)
-    st.stop()
 
-
-# --- 5. MAIN APPLICATION (Post-Authentication) ---
+# --- 4. MAIN APPLICATION (Post-Signup) ---
 is_backend_online = check_backend_status()
+
+user_name = st.session_state.get('user_name', 'Guest')
+user_org = st.session_state.get('user_org', 'Personal Workspace')
+user_role = st.session_state.get('user_role', 'User')
 
 st.markdown(f"""
     <div style='padding: 24px; background-color: #1e293b; border-radius: 12px; border: 1px solid #334155; margin-bottom: 24px; display: flex; justify-content: space-between; align-items: center;'>
         <div>
             <h1 style='margin:0; font-size: 1.8rem; color: #f8fafc;'>Executive Data Intelligence Suite</h1>
-            <p style='margin: 6px 0 0 0; color: #94a3b8; font-size: 0.95rem;'>Account: <b>{st.session_state.get('auth_email')}</b> | Mode: <b>Verified Access</b></p>
+            <p style='margin: 6px 0 0 0; color: #94a3b8; font-size: 0.95rem;'>User: <b>{user_name}</b> ({user_role}) | Workspace: <b>{user_org}</b></p>
         </div>
     </div>
 """, unsafe_allow_html=True)
@@ -516,7 +498,7 @@ if uploaded is not None:
                 # Slide 1: Title
                 slide1 = prs.slides.add_slide(prs.slide_layouts[0])
                 slide1.shapes.title.text = "Executive Financial Intelligence Report"
-                slide1.placeholders[1].text = f"Source: {st.session_state['current_filename']}\nPrepared for: {st.session_state.get('auth_email')}"
+                slide1.placeholders[1].text = f"Source: {st.session_state['current_filename']}\nPrepared for: {user_name} ({user_org})"
 
                 # Slide 2: Summary
                 slide2 = prs.slides.add_slide(prs.slide_layouts[5])
