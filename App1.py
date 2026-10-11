@@ -17,52 +17,42 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# CLEAN, TRUSTWORTHY EXECUTIVE CSS (Boardroom slate-navy styling)
+# CLEAN, TRUSTWORTHY EXECUTIVE CSS (Slate-navy corporate palette)
 st.markdown("""
 <style>
-    /* Global Corporate Dark Theme */
     .stApp {
         background-color: #0f172a;
         color: #e2e8f0;
     }
-    
-    /* Sidebar Styling */
     section[data-testid="stSidebar"] {
         background-color: #090d16;
         border-right: 1px solid #1e293b;
     }
-    
-    /* Professional Card Containers */
     .saas-card {
         background-color: #1e293b;
         border: 1px solid #334155;
-        padding: 24px;
+        padding: 32px;
         border-radius: 12px;
-        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.3);
         margin-bottom: 20px;
     }
-    
-    /* Clean Typography */
     h1, h2, h3 {
         color: #f8fafc;
         letter-spacing: -0.02em;
     }
-    
-    /* Professional Action Buttons */
     .stButton>button {
         background-color: #2563eb;
         color: white;
         border: none;
         border-radius: 8px;
         font-weight: 600;
-        padding: 0.5rem 1rem;
+        padding: 0.6rem 1.2rem;
         transition: background-color 0.2s ease;
+        width: 100%;
     }
     .stButton>button:hover {
         background-color: #1d4ed8;
     }
-    
-    /* Sleek Tab Styling */
     .stTabs [data-baseweb="tab-list"] {
         gap: 8px;
         background-color: #090d16;
@@ -85,8 +75,8 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # BACKEND API CONFIGURATION (Update with your live Render URL when deployed)
-BACKEND_URL = "http://127.0.0.1:8000"
-BACKEND_SECRET_KEY = "dev-secret-token" # Must match backend environment variable
+BACKEND_URL = "https://ai-data-analyzer-backend-xxxx.onrender.com"
+BACKEND_SECRET_KEY = "dev-secret-token"
 
 @st.cache_data(ttl=60)
 def check_backend_status():
@@ -153,14 +143,60 @@ class BusinessDataEngine:
                 pass
         return None, None
 
-# SILENT BACKGROUND STATUS CHECK
+
+# --- STRICT AUTHENTICATION & SPLASH SCREEN GATE ---
+if "authenticated" not in st.session_state:
+    st.session_state["authenticated"] = False
+
+if not st.session_state["authenticated"]:
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        st.markdown("<br>", unsafe_allow_html=True)
+        # Splash Screen Header & Logo Mock
+        st.markdown("""
+            <div style='text-align: center; padding: 20px;'>
+                <div style='font-size: 3.5rem; margin-bottom: 10px;'>📊</div>
+                <h1 style='color: #f8fafc; font-size: 2.2rem; margin-bottom: 4px;'>Executive Suite</h1>
+                <p style='color: #94a3b8; font-size: 1.05rem; margin-bottom: 30px;'>Secure Financial Intelligence & AI Advisory</p>
+            </div>
+        """, unsafe_allow_html=True)
+        
+        with st.container():
+            st.markdown('<div class="saas-card">', unsafe_allow_html=True)
+            st.subheader("Sign In / Register Enterprise Access")
+            st.caption("Enter your corporate details to launch your secure session.")
+            
+            with st.form("signup_form"):
+                user_email = st.text_input("Work Email Address", placeholder="cfo@company.com")
+                user_org = st.text_input("Organization / Company Name", placeholder="Acme Corp")
+                user_role = st.selectbox("Executive Role", ["CFO / Finance Director", "Business Owner / Founder", "Data Analyst", "Operations Manager"])
+                
+                submitted = st.form_submit_button("Launch Workspace")
+                if submitted:
+                    if user_email and "@" in user_email and user_org:
+                        st.session_state["authenticated"] = True
+                        st.session_state["user_email"] = user_email
+                        st.session_state["user_org"] = user_org
+                        st.session_state["user_role"] = user_role
+                        st.rerun()
+                    else:
+                        st.error("Please provide a valid work email and organization name.")
+            st.markdown('</div>', unsafe_allow_html=True)
+    st.stop()
+
+
+# --- MAIN APPLICATION (Post-Authentication) ---
 is_backend_online = check_backend_status()
 
-# MAIN HEADER BANNER
-st.markdown("""
-    <div style='padding: 24px; background-color: #1e293b; border-radius: 12px; border: 1px solid #334155; margin-bottom: 24px;'>
-        <h1 style='margin:0; font-size: 2.0rem; color: #f8fafc;'>Executive Data Intelligence Suite</h1>
-        <p style='margin: 8px 0 0 0; color: #94a3b8; font-size: 1.05rem;'>Professional Business Analytics & Server-Side AI Advisory</p>
+user_org_display = st.session_state.get("user_org", "Enterprise Workspace")
+user_role_display = st.session_state.get("user_role", "Executive")
+
+st.markdown(f"""
+    <div style='padding: 24px; background-color: #1e293b; border-radius: 12px; border: 1px solid #334155; margin-bottom: 24px; display: flex; justify-content: space-between; align-items: center;'>
+        <div>
+            <h1 style='margin:0; font-size: 1.8rem; color: #f8fafc;'>Executive Data Intelligence Suite</h1>
+            <p style='margin: 6px 0 0 0; color: #94a3b8; font-size: 0.95rem;'>Workspace: <b>{user_org_display}</b> | Role: <b>{user_role_display}</b></p>
+        </div>
     </div>
 """, unsafe_allow_html=True)
 
@@ -207,6 +243,10 @@ if uploaded is not None:
             st.session_state["active_df"] = pd.read_csv(io.BytesIO(file_bytes))
         else:
             st.session_state["active_df"] = pd.read_excel(io.BytesIO(file_bytes))
+        st.rerun()
+
+    if st.sidebar.button("Sign Out"):
+        st.session_state["authenticated"] = False
         st.rerun()
 
     tabs = [
@@ -373,7 +413,7 @@ if uploaded is not None:
                 # Slide 1: Title
                 slide1 = prs.slides.add_slide(prs.slide_layouts[0])
                 slide1.shapes.title.text = "Executive Financial Intelligence Report"
-                slide1.placeholders[1].text = f"Source: {st.session_state['current_filename']}\nGenerated via Executive Data Intelligence Suite"
+                slide1.placeholders[1].text = f"Source: {st.session_state['current_filename']}\nPrepared for: {user_org_display}"
 
                 # Slide 2: Summary
                 slide2 = prs.slides.add_slide(prs.slide_layouts[5])
@@ -499,7 +539,7 @@ if uploaded is not None:
 else:
     st.markdown("""
         <div style='text-align: center; padding: 60px; background-color: #1e293b; border-radius: 12px; border: 1px solid #334155; margin-top: 40px;'>
-            <h2 style='color: #f8fafc; margin-bottom: 8px;'>Ready for Analysis</h2>
-            <p style='color: #94a3b8; font-size: 1.05rem;'>Upload a business dataset above to launch the executive command center.</p>
+            <h2 style='color: #f8fafc; margin-bottom: 8px;'>Workspace Ready</h2>
+            <p style='color: #94a3b8; font-size: 1.05rem;'>Upload a business dataset above to initialize the executive command center.</p>
         </div>
     """, unsafe_allow_html=True)
