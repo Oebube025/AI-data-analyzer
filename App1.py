@@ -1,5 +1,5 @@
 """
-Executive Data Intelligence Suite - Streamlit Frontend (Rich Graph Integrations)
+Executive Data Intelligence Suite - Streamlit Frontend (Phase 2 & Rich Graph Integrated)
 Powered by Centralized Fact Sheet (analysis.py) and Multi-Slide Deck Generator (deck_builder.py)
 """
 
@@ -50,8 +50,8 @@ if "app_state" not in st.session_state:
 if st.session_state["app_state"] == "welcome":
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
-        st.markdown("<br><br><h1 style='text-align: center;'>Executive Intelligence Suite <span class='beta-badge'>PILOT BETA V6.5</span></h1>", unsafe_allow_html=True)
-        st.markdown("<p style='text-align: center; color: #94a3b8; margin-bottom: 30px;'>Rich Graph Integrations & Multi-Slide Boardroom Decks</p>", unsafe_allow_html=True)
+        st.markdown("<br><br><h1 style='text-align: center;'>Executive Intelligence Suite <span class='beta-badge'>PILOT BETA V6.6</span></h1>", unsafe_allow_html=True)
+        st.markdown("<p style='text-align: center; color: #94a3b8; margin-bottom: 30px;'>Rich Graph Integrations & 12-Slide Boardroom Decks</p>", unsafe_allow_html=True)
         st.markdown('<div class="saas-card">', unsafe_allow_html=True)
         if st.button("🚀 Launch Executive Workspace", type="primary"):
             st.session_state["app_state"] = "main"
@@ -139,7 +139,6 @@ if uploaded is not None:
         
         st.markdown("---")
         
-        # RICH GRAPH INTEGRATIONS: Overview Charts
         gcol1, gcol2 = st.columns(2)
         with gcol1:
             fig_overview = px.bar(
@@ -259,22 +258,22 @@ if uploaded is not None:
                 except Exception as e:
                     st.error(f"Connection error: {e}")
 
-    with tabs[5]: # Boardroom Deck
-        st.subheader("Automated Multi-Slide Boardroom Presentation Generator")
-        st.caption("Compile your verified financial metrics and category charts into a multi-slide executive presentation.")
+    with tabs[5]: # Boardroom Deck (12-Slide Strategic Generator)
+        st.subheader("Automated 12-Slide Strategic Boardroom Presentation")
+        st.caption("Compile your verified financial metrics, category breakdowns, and audit notes into a professional multi-slide executive presentation.")
         
-        if st.button("Generate Boardroom Deck (.pptx)", type="primary"):
-            with st.spinner("📊 Building multi-slide presentation with category charts..."):
+        if st.button("Generate Strategic Boardroom Deck (.pptx)", type="primary"):
+            with st.spinner("📊 Building professional 12-slide strategic boardroom deck..."):
                 try:
-                    deck_bytes = create_executive_deck(facts, currency=currency)
+                    deck_bytes = create_executive_deck(facts, currency=currency, filename=uploaded.name)
                     st.session_state["deck_bytes"] = deck_bytes
-                    st.success("✅ Executive presentation generated successfully!")
+                    st.success("✅ Strategic boardroom deck generated successfully!")
                 except Exception as e:
                     st.error(f"Error generating presentation: {e}")
 
         if "deck_bytes" in st.session_state:
             st.download_button(
-                label="📥 Download Executive Boardroom Deck (.pptx)",
+                label="📥 Download Strategic Boardroom Deck (.pptx)",
                 data=st.session_state["deck_bytes"],
                 file_name="Executive_Boardroom_Deck.pptx",
                 mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
@@ -283,7 +282,7 @@ if uploaded is not None:
 
     with tabs[6]: # Feedback
         st.subheader("Pilot Beta Feedback & Support")
-        st.markdown("We value your input as an initial tester for App1 v6.5!")
+        st.markdown("We value your input as an initial tester for App1 v6.6!")
         st.markdown("👉 **[Submit Feedback via Google Forms](https://forms.gle/your-feedback-link)**")
 else:
     st.info("👋 Welcome to App1! Please upload your dataset above to initialize the executive suite.")
