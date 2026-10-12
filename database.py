@@ -12,13 +12,12 @@ import os
 DB_FILE = "sme_intelligence.duckdb"
 
 def init_db():
-    """Initializes all DuckDB tables for tenants, scenarios, activity, and feedback."""
+    """Initializes all DuckDB tables safely without strict ID constraints."""
     conn = duckdb.connect(DB_FILE)
     
     # Table 1: Saved What-If Growth Scenarios
     conn.execute("""
         CREATE TABLE IF NOT EXISTS saved_scenarios (
-            id INTEGER PRIMARY KEY,
             session_id VARCHAR,
             scenario_name VARCHAR,
             revenue DOUBLE,
@@ -43,7 +42,6 @@ def init_db():
     # Table 3: Client Activity Logs
     conn.execute("""
         CREATE TABLE IF NOT EXISTS activity_logs (
-            id INTEGER PRIMARY KEY,
             email VARCHAR,
             action VARCHAR,
             timestamp TIMESTAMP
@@ -53,7 +51,6 @@ def init_db():
     # Table 4: In-App Feedback & Bug Reports
     conn.execute("""
         CREATE TABLE IF NOT EXISTS feedback (
-            id INTEGER PRIMARY KEY,
             email VARCHAR,
             category VARCHAR,
             message VARCHAR,
@@ -87,7 +84,7 @@ def load_scenarios_db(session_id: str) -> list:
         conn.close()
 
 def log_tenant_activity(email: str, company_name: str, action: str):
-    """Tracks SME tenant sign-ins, file uploads, and specific workspace actions."""
+    """Tracks SME tenant sign-ins, file uploads, and workspace actions without primary key collisions."""
     init_db()
     conn = duckdb.connect(DB_FILE)
     now = datetime.datetime.now()
