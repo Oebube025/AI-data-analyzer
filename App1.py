@@ -30,7 +30,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-BACKEND_URL = st.secrets.get("BACKEND_URL", "https://ai-data-analyzer-backend-your-service.onrender.com")
+BACKEND_URL = st.secrets.get("BACKEND_URL", "http://127.0.0.1:8000")
 BACKEND_SECRET_KEY = st.secrets.get("BACKEND_SECRET_KEY", "")
 
 @st.cache_data(ttl=60)
@@ -61,14 +61,6 @@ class BusinessDataEngine:
                         pass
         return cleaned
 
-    def audit_data_quality(self, active_df: pd.DataFrame):
-        total = active_df.size
-        if total == 0: return 0.0, 0, 0, []
-        missing = active_df.isna().sum().sum()
-        health = max(0.0, min(100.0, ((total - missing) / total) * 100))
-        issues = [f"Found {missing:,} missing cells."] if missing > 0 else []
-        return round(health, 1), missing, active_df.duplicated().sum(), issues
-
 if "app_state" not in st.session_state:
     st.session_state["app_state"] = "welcome"
     st.session_state["authenticated"] = False
@@ -88,6 +80,9 @@ if st.session_state["app_state"] == "welcome":
 
 # MAIN WORKSPACE
 is_online = check_backend_status(BACKEND_SECRET_KEY)
+if not is_online:
+    st.warning("Backend API is waking up or offline. Please check your Render service status or local server.")
+
 uploaded = st.file_uploader("Upload Dataset (.csv or .xlsx)", type=["csv", "xlsx"])
 
 if uploaded is not None:
@@ -101,7 +96,6 @@ if uploaded is not None:
         try:
             df = pd.read_csv(io.BytesIO(file_bytes), encoding="utf-8") if uploaded.name.lower().endswith('.csv') else pd.read_excel(io.BytesIO(file_bytes))
             st.session_state["active_df"] = df.copy()
-            # Register in backend DuckDB
             requests.post(f"{BACKEND_URL}/api/analyze", files={"file": (uploaded.name, file_bytes, "text/csv")}, headers={"X-API-Key": BACKEND_SECRET_KEY})
         except Exception as e:
             st.error(f"Error: {e}")
@@ -131,7 +125,7 @@ if uploaded is not None:
         c3.metric("Net Profit", f"{currency}{profit:,.2f}")
         st.dataframe(df_cleaned.head(10), use_container_width=True)
 
-    with tabs[1]: # What-If Simulator (Roadmap Phase 4)
+    with tabs[1]: # What-If Simulator
         st.subheader("Dynamic What-If Scenario Modeling")
         st.caption("Test real-time sensitivity adjustments on your financial metrics.")
         
@@ -158,7 +152,7 @@ if uploaded is not None:
             except Exception as e:
                 st.error(f"Simulation failed: {e}")
 
-    with tabs[2]: # SQL & AI Query (Roadmap Phase 1 & 2)
+    with tabs[2]: # SQL & AI Query
         st.subheader("DuckDB SQL & Intelligence Engine")
         sql_input = st.text_area("Enter DuckDB SQL Query", value="SELECT * FROM dataset LIMIT 5")
         if st.button("Execute Query"):
@@ -171,7 +165,7 @@ if uploaded is not None:
             except Exception as e:
                 st.error(f"Error: {e}")
 
-    with tabs[3]: # Boardroom Deck (Roadmap Phase 3)
+    with tabs[3]: # Boardroom Deck
         st.subheader("Automated Insight-to-Deck PowerPoint")
         if st.button("Generate PowerPoint Deck with Charts"):
             prs = Presentation()

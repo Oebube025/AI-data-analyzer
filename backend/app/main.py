@@ -121,6 +121,8 @@ def run_simulation(req: SimulationRequest, x_api_key: str = Header(None)):
             FROM dataset
         """
         res_df = duck_conn.execute(query).fetchdf()
+        # Normalize column names to lowercase to prevent KeyErrors
+        res_df.columns = [c.lower() for c in res_df.columns]
         rev = float(res_df['simulated_revenue'].iloc[0])
         cost = float(res_df['simulated_cost'].iloc[0])
         return {"simulated_revenue": rev, "simulated_cost": cost, "simulated_profit": rev - cost}
