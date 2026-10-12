@@ -232,7 +232,7 @@ if uploaded is not None:
                     f"{BACKEND_URL}/api/ai-advisory",
                     json={"verified_stats": stats_summary},
                     headers={"X-API-Key": BACKEND_SECRET_KEY},
-                    timeout=30
+                    timeout=120
                 )
                 if res.status_code == 200:
                     st.markdown(res.json().get("advisory", ""))
