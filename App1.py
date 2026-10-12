@@ -1,6 +1,7 @@
 """
 SME Data Intelligence Suite - Streamlit Frontend (App1.py)
-Automated CFO Briefs, Bank-Ready Decks, and What-If Calculators for Small Businesses.
+Automated CFO Briefs, Bank-Ready Pitch Decks, What-If Calculators, 
+In-App Client Feedback, and Secure Founder Monitoring.
 """
 
 import streamlit as st
@@ -11,12 +12,21 @@ import requests
 import io
 import hashlib
 import uuid
+import duckdb
+import os
 
 from analysis import analyze_dataset, auto_detect_columns
 from deck_builder import create_executive_deck
 from simulator import calculate_scenario, generate_sensitivity_matrix
-from database import init_db, save_scenario_db, load_scenarios_db
+from database import (
+    init_db, 
+    save_scenario_db, 
+    load_scenarios_db, 
+    log_tenant_activity, 
+    save_feedback_db
+)
 
+# 1. PAGE CONFIGURATION & STYLING
 st.set_page_config(
     page_title="AI CFO Suite for Small Business",
     page_icon="💼",
@@ -36,6 +46,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+# 2. INITIALIZE DATABASE & ENVIRONMENT SECRETS
 init_db()
 
 BACKEND_URL = st.secrets.get("BACKEND_URL", "http://127.0.0.1:8000")
@@ -48,16 +59,16 @@ def check_backend_status(token: str):
     except Exception:
         return False
 
+# Session State Initializations
 if "authenticated" not in st.session_state:
     st.session_state["authenticated"] = False
     st.session_state["session_id"] = str(uuid.uuid4())[:8]
 
-# Presets state initialization
 if "sim_price" not in st.session_state: st.session_state["sim_price"] = 5
 if "sim_vol" not in st.session_state: st.session_state["sim_vol"] = 0
 if "sim_vc" not in st.session_state: st.session_state["sim_vc"] = 0
 
-# LOGIN / AUTH GATE
+# 3. AUTHENTICATION / ACCESS GATE
 if not st.session_state["authenticated"]:
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
@@ -66,17 +77,29 @@ if not st.session_state["authenticated"]:
         
         with st.form("auth_form"):
             st.markdown("### 🔐 Enter Business Workspace")
+            client_email = st.text_input("Business Email", placeholder="owner@company.com")
+            company_name = st.text_input("Company Name", placeholder="Acme Services")
             user_key = st.text_input("Access Key / Passcode", type="password")
             submitted = st.form_submit_button("🚀 Launch Business Dashboard")
+            
             if submitted:
                 if user_key == BACKEND_SECRET_KEY or user_key == "demo-beta-2026":
                     st.session_state["authenticated"] = True
+                    st.session_state["user_email"] = client_email if client_email else f"user_{st.session_state['session_id']}@guest.com"
+                    st.session_state["company_name"] = company_name if company_name else "Independent SME"
+                    
+                    # Track tenant registration & login
+                    log_tenant_activity(
+                        st.session_state["user_email"], 
+                        st.session_state["company_name"], 
+                        "Workspace Sign-In"
+                    )
                     st.rerun()
                 else:
                     st.error("❌ Invalid access key.")
         st.stop()
 
-# WORKSPACE
+# 4. MAIN WORKSPACE UI
 is_online = check_backend_status(BACKEND_SECRET_KEY)
 if not is_online:
     st.warning("⚠️ AI Advisor Backend is starting up... Please wait a moment.")
@@ -105,8 +128,15 @@ if uploaded is not None:
             st.session_state["active_df"] = df.copy()
             st.session_state.pop("deck_bytes", None)
             
-            # Auto-detect columns upon fresh upload
+            # Auto-detect column mappings upon fresh upload
             st.session_state["detected_cols"] = auto_detect_columns(df)
+            
+            # Log file upload activity for tenant
+            log_tenant_activity(
+                st.session_state.get("user_email", "guest"), 
+                st.session_state.get("company_name", "SME"), 
+                f"Uploaded File: {uploaded.name}"
+            )
         except Exception as e:
             st.error(f"Error reading file: {e}")
             st.stop()
@@ -114,7 +144,7 @@ if uploaded is not None:
     df = st.session_state["active_df"]
     auto_cols = st.session_state.get("detected_cols", auto_detect_columns(df))
 
-    # Sidebar: Auto-populated controls
+    # 5. SIDEBAR CONTROLS & AUTO-MAPPING
     st.sidebar.markdown("### ⚙️ Business Settings")
     currency = st.sidebar.selectbox("Currency Symbol", ["$", "₦", "€", "£"])
     
@@ -152,19 +182,51 @@ if uploaded is not None:
     facts = analyze_dataset(df, revenue_col=sel_rev, cost_col=sel_cost, category_col=sel_cat)
 
     st.sidebar.markdown("---")
-    st.sidebar.markdown(f"### 👤 Business Workspace: `{st.session_state['session_id']}`")
+    st.sidebar.markdown(f"### 👤 Business: `{st.session_state.get('company_name', 'SME')}`")
     if st.sidebar.button("🔒 Exit Workspace"):
         st.session_state["authenticated"] = False
         st.rerun()
 
-    # SME Plain-English Workspace Tabs
+    # 🛠️ FOUNDER ADMIN PANEL (PROTECTED BY PASSWORD)
+    st.sidebar.markdown("---")
+    with st.sidebar.expander("🛠️ Founder Admin Panel"):
+        admin_pass = st.text_input("Master Password", type="password", key="admin_password_input")
+        if admin_pass == "Caleb@2020":
+            st.success("🔓 Admin Unlocked")
+            DB_FILE = "sme_intelligence.duckdb"
+            
+            if os.path.exists(DB_FILE):
+                conn = duckdb.connect(DB_FILE)
+                
+                st.markdown("#### 👥 Registered Tenants & Activity")
+                try:
+                    tenants_df = conn.execute("SELECT email, company_name, created_at, last_active, total_uploads FROM tenants ORDER BY last_active DESC").fetchdf()
+                    st.dataframe(tenants_df, use_container_width=True)
+                except Exception:
+                    st.info("No tenant data recorded yet.")
+                
+                st.markdown("#### 💬 Client Feedback Inbox")
+                try:
+                    feedback_df = conn.execute("SELECT email, category, message, timestamp FROM feedback ORDER BY timestamp DESC").fetchdf()
+                    st.dataframe(feedback_df, use_container_width=True)
+                except Exception:
+                    st.info("No feedback submitted yet.")
+                    
+                conn.close()
+            else:
+                st.info("Database file not created yet.")
+        elif admin_pass:
+            st.error("❌ Incorrect password")
+
+    # 6. SME WORKSPACE TABS
     tabs = st.tabs([
         "💰 Cash & Profit Overview", 
         "🏆 Top Products & Sales", 
         "🚨 Red Flags & Audit", 
         "🧮 Pricing Calculator", 
         "🧠 AI Fractional CFO Brief", 
-        "📊 Bank & Investor Pitch Deck"
+        "📊 Bank & Investor Pitch Deck",
+        "💬 Feedback & Support"
     ])
 
     with tabs[0]: # Cash & Profit Overview
@@ -271,86 +333,4 @@ if uploaded is not None:
             st.rerun()
 
         st.markdown("---")
-        col_w1, col_w2 = st.columns(2)
-        with col_w1:
-            scenario_name = st.text_input("Scenario Label", value="Growth Plan 1")
-            price_adj = st.slider("Price Adjustment (%)", -50, 50, value=int(st.session_state["sim_price"]))
-            volume_adj = st.slider("Sales Volume Shift (%)", -50, 50, value=int(st.session_state["sim_vol"]))
-        with col_w2:
-            fixed_cost_change = st.number_input("Fixed Expense Adjustment (e.g., +Rent)", value=0.0, step=500.0)
-            variable_cost_pct = st.slider("Variable Expense Shift (%)", -50, 50, value=int(st.session_state["sim_vc"]))
-
-        current_res = calculate_scenario(facts["totals"], price_adj, volume_adj, fixed_cost_change, variable_cost_pct)
-
-        sc1, sc2, sc3, sc4 = st.columns(4)
-        sc1.metric("Projected Sales", f"{currency}{current_res['revenue']:,.2f}", f"{price_adj + volume_adj}%")
-        sc2.metric("Projected Expenses", f"{currency}{current_res['costs']:,.2f}")
-        sc3.metric("Projected Net Profit", f"{currency}{current_res['net_profit']:,.2f}", f"{current_res['profit_delta']:+,.2f}")
-        sc4.metric("Projected Margin", f"{current_res['profit_margin']:.1f}%")
-
-        if st.button("💾 Save Plan to Workspace Database", type="primary"):
-            save_scenario_db(st.session_state["session_id"], scenario_name, current_res)
-            st.success(f"Saved '{scenario_name}' to database!")
-
-        saved_db_scenarios = load_scenarios_db(st.session_state["session_id"])
-        if saved_db_scenarios:
-            st.markdown("### 📊 Stored Growth Models")
-            st.dataframe(pd.DataFrame(saved_db_scenarios)[['scenario_name', 'revenue', 'costs', 'net_profit', 'margin']], use_container_width=True)
-
-        st.markdown("---")
-        st.markdown("### 📈 Estimated Take-Home Profit Matrix (Price vs. Sales Volume)")
-        sens_matrix = generate_sensitivity_matrix(facts["totals"])
-        st.dataframe(pd.DataFrame(sens_matrix), use_container_width=True)
-
-    with tabs[4]: # AI Fractional CFO Brief
-        st.subheader("On-Demand AI Fractional CFO Advisor")
-        st.caption("Generate a plain-English, 6-section CFO brief evaluating your financial health and saved scenarios.")
-        
-        if st.button("Generate AI CFO Advice Brief", type="primary"):
-            with st.spinner("🤖 Analyzing business data & scenarios..."):
-                try:
-                    db_scenarios = load_scenarios_db(st.session_state["session_id"])
-                    res = requests.post(
-                        f"{BACKEND_URL}/api/ai-advisory",
-                        json={"verified_stats": facts, "saved_scenarios": db_scenarios},
-                        headers={"X-API-Key": BACKEND_SECRET_KEY},
-                        timeout=120
-                    )
-                    try:
-                        res_json = res.json()
-                    except Exception:
-                        res_json = {"detail": res.text or "Server error."}
-
-                    if res.status_code == 200:
-                        st.markdown("### 📋 Monthly Business Intelligence Brief")
-                        st.markdown('<div class="saas-card">', unsafe_allow_html=True)
-                        st.markdown(res_json.get("advisory", ""))
-                        st.markdown('</div>', unsafe_allow_html=True)
-                    else:
-                        st.error(res_json.get('detail', 'AI advisory request failed.'))
-                except Exception as e:
-                    st.error(f"Connection error: {e}")
-
-    with tabs[5]: # Bank & Investor Pitch Deck
-        st.subheader("Automated Presentation Deck (.pptx)")
-        st.caption("Generate a professional 12-slide presentation deck ready for bank loan applications, partners, or local investors.")
-        
-        if st.button("Generate Pitch Deck (.pptx)", type="primary"):
-            with st.spinner("📊 Building professional presentation deck..."):
-                try:
-                    deck_bytes = create_executive_deck(facts, currency=currency, filename=uploaded.name)
-                    st.session_state["deck_bytes"] = deck_bytes
-                    st.success("✅ Presentation deck generated successfully!")
-                except Exception as e:
-                    st.error(f"Error generating presentation deck: {e}")
-
-        if "deck_bytes" in st.session_state:
-            st.download_button(
-                label="📥 Download Bank-Ready Deck (.pptx)",
-                data=st.session_state["deck_bytes"],
-                file_name="Business_Financial_Overview.pptx",
-                mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
-                type="primary"
-            )
-else:
-    st.info("👋 Welcome! Please upload your monthly business spreadsheet (.csv or .xlsx) above to begin.")
+        col_w1, col_w2 = st.
