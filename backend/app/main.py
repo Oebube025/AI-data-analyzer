@@ -1,21 +1,22 @@
 """
 FastAPI Backend (backend/app/main.py)
-Phase 3 (Extended): Structured 6-Section AI Reporting with Strict Number Verification.
+Fixed AI Advisory Request model to accept dict or string payloads.
 """
 
 from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel
+from typing import Any
 import os
 import cohere
 import logging
 
-app = FastAPI(title="Executive Intelligence Backend", version="6.8")
+app = FastAPI(title="Executive Intelligence Backend", version="6.9")
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("uvicorn")
 
 class AIAdvisoryRequest(BaseModel):
-    verified_stats: dict  # Receives the complete centralized fact dictionary
+    verified_stats: Any  # Accepts both dict and string payloads seamlessly
 
 @app.get("/health")
 async def health_check(x_api_key: str = Header(None)):
@@ -37,13 +38,16 @@ async def generate_ai_advisory(payload: AIAdvisoryRequest, x_api_key: str = Head
     try:
         co = cohere.Client(api_key)
         
-        # Phase 3 Extended: 6-Section Structured Prompt with Strict Grounding
+        # Convert dict or string payload into a clean string representation for the prompt
+        stats_content = payload.verified_stats if isinstance(payload.verified_stats, str) else str(payload.verified_stats)
+
+        # 6-Section Structured Prompt with Strict Grounding
         prompt = f"""
         You are an elite Chief Financial Officer and Board Advisor. 
         Analyze the following verified dataset statistics strictly. DO NOT invent, assume, or extrapolate numbers not present in this dataset fact sheet. Every financial figure quoted must match the verified statistics verbatim.
 
         VERIFIED DATASET FACT SHEET:
-        {payload.verified_stats}
+        {stats_content}
 
         Provide a comprehensive, professional advisory report formatted strictly into the following 6 clear markdown sections:
         1. 📊 EXECUTIVE FINANCIAL HEALTH & SNAPSHOT (Evaluate revenue scale, cost absorption, net profit, and overall margin performance).
