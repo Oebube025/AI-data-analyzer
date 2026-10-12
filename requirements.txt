@@ -1,8 +1,9 @@
 fastapi
 uvicorn
+pydantic
 pandas
 numpy
 cohere
-duckdb
 python-pptx
 openpyxl
+python-multipart
