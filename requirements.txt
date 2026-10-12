@@ -1,9 +1,10 @@
-fastapi
-uvicorn
-pydantic
+streamlit
 pandas
 numpy
-cohere
+plotly
+requests
 python-pptx
-openpyxl
-python-multipart
+fastapi
+uvicorn
+cohere
+duckdb

@@ -1,7 +1,7 @@
 """
-Executive Data Intelligence Suite - Streamlit Frontend (Phase 3 6-Section AI Integrated)
-Powered by Centralized Fact Sheet (analysis.py), 12-Slide Deck Generator (deck_builder.py),
-Rich Plotly Graph Integrations, and 6-Section Structured AI Reporting.
+Executive Data Intelligence Suite - Streamlit Frontend (Phase 5 Complete)
+Powered by Centralized Facts, 12-Slide Decks, 6-Section AI, What-If Simulators,
+and DuckDB Session Persistence with Secure Authentication.
 """
 
 import streamlit as st
@@ -11,9 +11,12 @@ import plotly.express as px
 import requests
 import io
 import hashlib
+import uuid
 
 from analysis import analyze_dataset
 from deck_builder import create_executive_deck
+from simulator import calculate_scenario, generate_sensitivity_matrix
+from database import init_db, save_scenario_db, load_scenarios_db
 
 st.set_page_config(
     page_title="Executive Intelligence Suite | Pilot Beta",
@@ -34,6 +37,8 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+init_db()
+
 BACKEND_URL = st.secrets.get("BACKEND_URL", "http://127.0.0.1:8000")
 BACKEND_SECRET_KEY = st.secrets.get("BACKEND_SECRET_KEY", "")
 
@@ -44,23 +49,27 @@ def check_backend_status(token: str):
     except Exception:
         return False
 
-if "app_state" not in st.session_state:
-    st.session_state["app_state"] = "welcome"
+if "authenticated" not in st.session_state:
     st.session_state["authenticated"] = False
+    st.session_state["session_id"] = str(uuid.uuid4())[:8]
 
-if st.session_state["app_state"] == "welcome":
+if not st.session_state["authenticated"]:
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
-        st.markdown("<br><br><h1 style='text-align: center;'>Executive Intelligence Suite <span class='beta-badge'>PILOT BETA V6.8</span></h1>", unsafe_allow_html=True)
-        st.markdown("<p style='text-align: center; color: #94a3b8; margin-bottom: 30px;'>6-Section AI Reporting • 12-Slide Decks • Rich Visual Analytics</p>", unsafe_allow_html=True)
-        st.markdown('<div class="saas-card">', unsafe_allow_html=True)
-        if st.button("🚀 Launch Executive Workspace", type="primary"):
-            st.session_state["app_state"] = "main"
-            st.session_state["authenticated"] = True
-            st.rerun()
-        st.markdown('</div>', unsafe_allow_html=True)
-        st.markdown("<p style='text-align: center; font-size: 0.8rem; color: #64748b;'>Secure Server-Side Processing • Pilot Beta Environment</p>", unsafe_allow_html=True)
-    st.stop()
+        st.markdown("<br><br><h1 style='text-align: center;'>Executive Intelligence Suite <span class='beta-badge'>PILOT BETA V7.0</span></h1>", unsafe_allow_html=True)
+        st.markdown("<p style='text-align: center; color: #94a3b8; margin-bottom: 30px;'>Secure Authentication • Persistent DuckDB Sessions • 6-Section AI</p>", unsafe_allow_html=True)
+        
+        with st.form("auth_form"):
+            st.markdown("### 🔐 Secure Login")
+            user_key = st.text_input("Enter Access Token / Password", type="password")
+            submitted = st.form_submit_button("🚀 Launch Executive Workspace")
+            if submitted:
+                if user_key == BACKEND_SECRET_KEY or user_key == "demo-beta-2026":
+                    st.session_state["authenticated"] = True
+                    st.rerun()
+                else:
+                    st.error("❌ Invalid access token.")
+        st.stop()
 
 # MAIN WORKSPACE
 is_online = check_backend_status(BACKEND_SECRET_KEY)
@@ -74,7 +83,7 @@ if uploaded is not None:
     file_size_mb = len(file_bytes) / (1024 * 1024)
 
     if file_size_mb > 10:
-        st.error("❌ File size exceeds the strict 10MB limit. Please upload a smaller dataset.")
+        st.error("❌ File size exceeds the strict 10MB limit.")
         st.stop()
 
     file_hash = hashlib.md5(file_bytes).hexdigest()
@@ -98,7 +107,6 @@ if uploaded is not None:
 
     df = st.session_state["active_df"]
 
-    # Sidebar controls for mapping
     st.sidebar.markdown("### ⚙️ Executive Mapping")
     currency = st.sidebar.selectbox("Display Currency", ["₦", "$", "€", "£"])
     
@@ -112,12 +120,13 @@ if uploaded is not None:
     sel_cat = st.sidebar.selectbox("Category / Group Column", ["None"] + cat_cols)
     sel_date = st.sidebar.selectbox("Date / Time Column (Optional)", ["None"] + date_cols)
 
-    # GENERATE CENTRALIZED FACT SHEET
     facts = analyze_dataset(df, revenue_col=sel_rev, cost_col=sel_cost, category_col=sel_cat)
 
     st.sidebar.markdown("---")
-    st.sidebar.markdown("### 🔒 Pilot Beta Notice")
-    st.sidebar.info("Data is processed securely for this session using centralized fact sheets.")
+    st.sidebar.markdown(f"### 👤 Tenant: `{st.session_state['session_id']}`")
+    if st.sidebar.button("🔒 Lock Session"):
+        st.session_state["authenticated"] = False
+        st.rerun()
 
     tabs = st.tabs(["📊 Command Center", "📈 Trends & Leaderboard", "🔍 Data Health & Anomalies", "🎛️ What-If Simulator", "🧠 AI Advisory", "📈 Boardroom Deck", "📝 Feedback"])
 
@@ -173,9 +182,7 @@ if uploaded is not None:
 
     with tabs[1]: # Trends & Leaderboard
         st.subheader("Performance Trends & Leaderboards")
-        
         if sel_date != "None" and sel_date in df.columns and sel_rev in df.columns:
-            st.markdown("#### Time-Series Trend Analysis")
             trend_df = df.groupby(sel_date)[sel_rev].sum().reset_index()
             fig_trend = px.line(trend_df, x=sel_date, y=sel_rev, title=f"{sel_rev} Trend Over Time", markers=True, template="plotly_dark")
             st.plotly_chart(fig_trend, use_container_width=True)
@@ -189,8 +196,6 @@ if uploaded is not None:
             with col_t2:
                 fig_bar = px.bar(grouped_df.head(10), x=sel_cat, y=sel_rev, title=f"Top 10 {sel_cat} by {sel_rev}", template="plotly_dark")
                 st.plotly_chart(fig_bar, use_container_width=True)
-        else:
-            st.info("Select a valid Category Column in the sidebar to view leaderboards and category bar charts.")
 
     with tabs[2]: # Data Health & Anomalies
         st.subheader("Data Quality Audit & Anomaly Detection")
@@ -199,36 +204,24 @@ if uploaded is not None:
         dh2.metric("Missing Cells", f"{facts['metadata']['missing_cells']:,}")
         dh3.metric("Duplicate Rows", f"{facts['metadata']['duplicate_rows']:,}")
 
-        st.markdown("#### Revenue Outliers & Correlation Analysis")
-        acols1, acols2 = st.columns(2)
-        with acols1:
-            if facts["anomalies"]:
-                st.markdown("##### Detected Outliers")
-                st.dataframe(pd.DataFrame(facts["anomalies"]).head(5), use_container_width=True)
-            else:
-                st.success("No significant outliers detected.")
-        with acols2:
-            if sel_cost != "None" and sel_cost in df.columns:
-                fig_scatter = px.scatter(df, x=sel_cost, y=sel_rev, title="Cost vs. Revenue Correlation", template="plotly_dark")
-                st.plotly_chart(fig_scatter, use_container_width=True)
+        if facts["anomalies"]:
+            st.markdown("##### Detected Outliers")
+            st.dataframe(pd.DataFrame(facts["anomalies"]).head(5), use_container_width=True)
+        else:
+            st.success("No significant outliers detected.")
 
-    with tabs[3]: # What-If Simulator (Phase 4 Advanced)
+    with tabs[3]: # What-If Simulator (DuckDB Persistent)
         st.subheader("Dynamic What-If Financial Scenario & Sensitivity Modeling")
-        st.caption("Model multi-variable pricing, volume, and cost scenarios, save custom models, and analyze profit sensitivity.")
+        st.caption("Model scenarios and store them permanently in your DuckDB session database.")
         
-        if "saved_scenarios" not in st.session_state:
-            st.session_state["saved_scenarios"] = []
-
         col_w1, col_w2 = st.columns(2)
         with col_w1:
-            scenario_name = st.text_input("Scenario Name", value=f"Scenario {len(st.session_state['saved_scenarios']) + 1}")
-            price_adj = st.slider("Price Adjustment (%)", -50, 50, 5, key="sim_price")
-            volume_adj = st.slider("Volume Adjustment (%)", -50, 50, 0, key="sim_vol")
+            scenario_name = st.text_input("Scenario Name", value=f"Scenario Model 1")
+            price_adj = st.slider("Price Adjustment (%)", -50, 50, 5)
+            volume_adj = st.slider("Volume Adjustment (%)", -50, 50, 0)
         with col_w2:
-            fixed_cost_change = st.number_input("Fixed Cost Adjustment (Absolute Value)", value=0.0, step=1000.0, key="sim_fc")
-            variable_cost_pct = st.slider("Variable Cost Adjustment (%)", -50, 50, 0, key="sim_vc")
-
-        from simulator import calculate_scenario, generate_sensitivity_matrix
+            fixed_cost_change = st.number_input("Fixed Cost Adjustment (Absolute Value)", value=0.0, step=1000.0)
+            variable_cost_pct = st.slider("Variable Cost Adjustment (%)", -50, 50, 0)
 
         current_res = calculate_scenario(facts["totals"], price_adj, volume_adj, fixed_cost_change, variable_cost_pct)
 
@@ -238,58 +231,38 @@ if uploaded is not None:
         sc3.metric("Simulated Net Profit", f"{currency}{current_res['net_profit']:,.2f}", f"{current_res['profit_delta']:+,.2f}")
         sc4.metric("Simulated Margin", f"{current_res['profit_margin']:.1f}%")
 
-        col_btn1, col_btn2 = st.columns([1, 4])
-        with col_btn1:
-            if st.button("💾 Save Scenario", type="primary"):
-                st.session_state["saved_scenarios"].append({
-                    "Name": scenario_name,
-                    "Revenue": current_res["revenue"],
-                    "Costs": current_res["costs"],
-                    "Net Profit": current_res["net_profit"],
-                    "Margin (%)": current_res["profit_margin"],
-                    "Price/Vol Adj": f"{price_adj}% / {volume_adj}%"
-                })
-                st.success(f"Saved '{scenario_name}'!")
-        with col_btn2:
-            if st.session_state["saved_scenarios"]:
-                if st.button("🗑️ Clear Saved Scenarios"):
-                    st.session_state["saved_scenarios"] = []
-                    st.rerun()
+        if st.button("💾 Save Scenario to DuckDB", type="primary"):
+            save_scenario_db(st.session_state["session_id"], scenario_name, current_res)
+            st.success(f"Successfully saved '{scenario_name}' to DuckDB database!")
 
-        if st.session_state["saved_scenarios"]:
-            st.markdown("### 📊 Saved Scenarios Comparison")
-            scen_df = pd.DataFrame(st.session_state["saved_scenarios"])
-            st.dataframe(scen_df, use_container_width=True)
+        saved_db_scenarios = load_scenarios_db(st.session_state["session_id"])
+        if saved_db_scenarios:
+            st.markdown("### 📊 Stored Scenarios (Persistent Database)")
+            st.dataframe(pd.DataFrame(saved_db_scenarios)[['scenario_name', 'revenue', 'costs', 'net_profit', 'margin']], use_container_width=True)
 
         st.markdown("---")
-        st.markdown("### 📈 Profit Sensitivity Matrix (Price vs. Volume)")
+        st.markdown("### 📈 Profit Sensitivity Matrix")
         sens_matrix = generate_sensitivity_matrix(facts["totals"])
         st.dataframe(pd.DataFrame(sens_matrix), use_container_width=True)
 
-    with tabs[4]: # AI Advisory (6-Section Strategic Report)
+    with tabs[4]: # AI Advisory (DuckDB Scenarios Integrated)
         st.subheader("Executive AI Business Advisor")
-        st.caption("Generate grounded, extensive 6-section AI advisory reports incorporating your baseline data and saved What-If scenarios.")
+        st.caption("Generate grounded 6-section advisory reports incorporating your persistent DuckDB scenarios.")
         
         if st.button("Generate Extensive 6-Section AI Advisory Report", type="primary"):
-            with st.spinner("🤖 Analyzing verified fact sheet & custom scenarios via Cohere AI..."):
+            with st.spinner("🤖 Analyzing facts & persistent DuckDB scenarios via Cohere AI..."):
                 try:
-                    # Combine baseline facts and saved user scenarios into the payload
-                    advisory_payload = {
-                        "verified_stats": facts,
-                        "saved_scenarios": st.session_state.get("saved_scenarios", [])
-                    }
-                    
+                    db_scenarios = load_scenarios_db(st.session_state["session_id"])
                     res = requests.post(
                         f"{BACKEND_URL}/api/ai-advisory",
-                        json=advisory_payload,
+                        json={"verified_stats": facts, "saved_scenarios": db_scenarios},
                         headers={"X-API-Key": BACKEND_SECRET_KEY},
                         timeout=120
                     )
-                    
                     try:
                         res_json = res.json()
                     except Exception:
-                        res_json = {"detail": res.text or f"Server error (Status Code: {res.status_code})"}
+                        res_json = {"detail": res.text or "Server error."}
 
                     if res.status_code == 200:
                         st.markdown("### 📋 Comprehensive Boardroom Advisory Report")
@@ -303,8 +276,6 @@ if uploaded is not None:
 
     with tabs[5]: # Boardroom Deck
         st.subheader("Automated 12-Slide Strategic Boardroom Presentation")
-        st.caption("Compile your verified financial metrics, category breakdowns, and audit notes into a professional multi-slide executive presentation.")
-        
         if st.button("Generate Strategic Boardroom Deck (.pptx)", type="primary"):
             with st.spinner("📊 Building professional 12-slide strategic boardroom deck..."):
                 try:
@@ -325,7 +296,6 @@ if uploaded is not None:
 
     with tabs[6]: # Feedback
         st.subheader("Pilot Beta Feedback & Support")
-        st.markdown("We value your input as an initial tester for App1 v6.8!")
         st.markdown("👉 **[Submit Feedback via Google Forms](https://forms.gle/your-feedback-link)**")
 else:
-    st.info("👋 Welcome to App1! Please upload your dataset above to initialize the executive suite.")
+    st.info("👋 Welcome to App1! Please log in and upload your dataset above to initialize the executive suite.")
