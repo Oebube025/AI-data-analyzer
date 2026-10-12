@@ -1,99 +1,113 @@
 """
-Core Analytics Fact Sheet Engine (analysis.py)
-Phase 1: Centralized Single Source of Truth for Dashboard, Deck, and AI Advisor.
-Contains ZERO Streamlit or FastAPI imports.
+SME Data Intelligence Fact Engine (analysis.py)
+Automated column role detection, quality auditing, and metric aggregation.
+Contains ZERO Streamlit dependencies.
 """
 
 import pandas as pd
 import numpy as np
 
-def analyze_dataset(df: pd.DataFrame, revenue_col: str = None, cost_col: str = None, category_col: str = None) -> dict:
+def auto_detect_columns(df: pd.DataFrame) -> dict:
+    """
+    Intelligently auto-detects column roles for SMEs to minimize manual setup.
+    """
+    num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+    cat_cols = df.select_dtypes(include=['object', 'category', 'bool']).columns.tolist()
+    
+    # Filter out numeric ID/code columns
+    valid_nums = [c for c in num_cols if not any(k in c.lower() for k in ['id', 'code', 'zip', 'year', 'phone'])]
+    
+    # Auto-detect Revenue / Sales column
+    rev_keywords = ['revenue', 'sales', 'total', 'amount', 'income', 'price', 'units_sold', 'turnover']
+    sel_rev = next((c for c in valid_nums if any(k in c.lower() for k in rev_keywords)), valid_nums[0] if valid_nums else (num_cols[0] if num_cols else ""))
+    
+    # Auto-detect Cost / Expense column
+    cost_keywords = ['cost', 'expense', 'cogs', 'spending', 'payout', 'unit_cost', 'fee']
+    sel_cost = next((c for c in valid_nums if any(k in c.lower() for k in cost_keywords) and c != sel_rev), "None")
+    
+    # Auto-detect Category / Product / Client column
+    cat_keywords = ['category', 'product', 'item', 'group', 'service', 'type', 'channel', 'client', 'customer', 'branch']
+    sel_cat = next((c for c in cat_cols if any(k in c.lower() for k in cat_keywords)), cat_cols[0] if cat_cols else "None")
+    
+    # Auto-detect Date column
+    date_cols = [c for c in df.columns if any(k in c.lower() for k in ['date', 'time', 'month', 'period', 'created', 'day'])]
+    sel_date = date_cols[0] if date_cols else "None"
+    
+    return {
+        "revenue_col": sel_rev,
+        "cost_col": sel_cost,
+        "category_col": sel_cat,
+        "date_col": sel_date
+    }
+
+def analyze_dataset(df: pd.DataFrame, revenue_col: str, cost_col: str = "None", category_col: str = "None") -> dict:
     warnings = []
     
-    # 1. Detect potential summary/totals rows
-    for col in df.columns:
-        if df[col].astype(str).str.contains(r'^(total|sum|overall)', case=False, na=False).any():
-            warnings.append(f"Potential summary/total row detected in column '{col}'.")
+    if revenue_col not in df.columns:
+        return {"warnings": ["Revenue column not found."], "totals": {}, "metadata": {}}
+
+    rev_series = pd.to_numeric(df[revenue_col], errors='coerce').fillna(0)
+    total_rev = float(rev_series.sum())
     
-    # Identify numeric columns and clean text-numeric formats (currency symbols, commas, brackets)
-    num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
-    for col in df.columns:
-        if col not in num_cols:
-            sample = df[col].dropna().head(20).astype(str)
-            if sample.str.contains(r'[₦$€£,\(\)]', regex=True).any():
-                try:
-                    converted = sample.str.replace(r'[₦$€£,]', '', regex=True).str.replace(r'\((.*?)\)', r'-\1', regex=True)
-                    pd.to_numeric(converted, errors='raise')
-                    df[col] = df[col].astype(str).str.replace(r'[₦$€£,]', '', regex=True).str.replace(r'\((.*?)\)', r'-\1', regex=True)
-                    df[col] = pd.to_numeric(df[col], errors='coerce')
-                    num_cols.append(col)
-                    warnings.append(f"Converted text-numeric column '{col}' to numeric format.")
-                except Exception:
-                    pass
+    if cost_col != "None" and cost_col in df.columns:
+        cost_series = pd.to_numeric(df[cost_col], errors='coerce').fillna(0)
+        total_cost = float(cost_series.sum())
+    else:
+        total_cost = 0.0
+        warnings.append("No cost column selected. Operating expense tracking is disabled.")
 
-    # Auto-select revenue and cost columns if not provided
-    valid_nums = [c for c in num_cols if not any(k in c.lower() for k in ['id', 'code', 'year'])]
-    if not revenue_col or revenue_col not in df.columns:
-        revenue_col = valid_nums[0] if valid_nums else (num_cols[0] if num_cols else None)
-    
-    if not cost_col or cost_col not in df.columns or cost_col == "None":
-        cost_candidates = [c for c in valid_nums if c != revenue_col and any(k in c.lower() for k in ['cost', 'expense', 'cogs'])]
-        cost_col = cost_candidates[0] if cost_candidates else "None"
+    net_profit = total_rev - total_cost
+    margin = (net_profit / total_rev * 100.0) if total_rev > 0 else 0.0
 
-    # Calculate core financials
-    tot_rev = float(df[revenue_col].sum()) if revenue_col and revenue_col in df else 0.0
-    tot_cost = float(df[cost_col].sum()) if cost_col != "None" and cost_col in df else 0.0
-    net_profit = tot_rev - tot_cost
-    profit_margin = (net_profit / tot_rev * 100) if tot_rev > 0 else 0.0
-
-    # Data Health Index & Audits
+    # SME Data Quality Audit
     total_cells = df.size
-    missing_cells = int(df.isna().sum().sum())
-    health_index = max(0.0, min(100.0, ((total_cells - missing_cells) / max(1, total_cells)) * 100))
-    duplicates = int(df.duplicated().sum())
+    missing_cells = int(df.isnull().sum().sum())
+    dup_rows = int(df.duplicated().sum())
+    health_index = round(100.0 * (1.0 - (missing_cells + dup_rows) / max(total_cells, 1)), 1)
 
-    # Category breakdowns & leaderboards
-    cat_cols = df.select_dtypes(include=['object', 'category', 'bool']).columns.tolist()
-    if not category_col or category_col not in df.columns:
-        category_col = cat_cols[0] if cat_cols else None
-
-    revenue_by_category = {}
+    # Category Breakdown & Leaderboards
+    category_rev = {}
     top_items = []
     bottom_items = []
-    if category_col and revenue_col and category_col in df and revenue_col in df:
-        grouped = df.groupby(category_col)[revenue_col].sum().reset_index().sort_values(by=revenue_col, ascending=False)
-        revenue_by_category = grouped.set_index(category_col)[revenue_col].to_dict()
-        top_items = grouped.head(5).to_dict(orient="records")
-        bottom_items = grouped.tail(5).to_dict(orient="records")
+    
+    if category_col != "None" and category_col in df.columns:
+        grouped = df.groupby(category_col)[revenue_col].sum().sort_values(ascending=False)
+        category_rev = {str(k): float(v) for k, v in grouped.items()}
+        
+        top_df = grouped.head(5).reset_index()
+        bottom_df = grouped.tail(5).reset_index()
+        top_items = top_df.to_dict(orient="records")
+        bottom_items = bottom_df.to_dict(orient="records")
 
-    # IQR Anomaly Detection
+    # IQR Anomaly / Outlier Detection
     anomalies = []
-    if revenue_col and revenue_col in df:
-        q1 = df[revenue_col].quantile(0.25)
-        q3 = df[revenue_col].quantile(0.75)
-        iqr = q3 - q1
-        upper_bound = q3 + 1.5 * iqr
-        outlier_df = df[df[revenue_col] > upper_bound]
-        anomalies = outlier_df.head(10).to_dict(orient="records")
+    q1 = rev_series.quantile(0.25)
+    q3 = rev_series.quantile(0.75)
+    iqr = q3 - q1
+    if iqr > 0:
+        outlier_mask = (rev_series < (q1 - 1.5 * iqr)) | (rev_series > (q3 + 1.5 * iqr))
+        outlier_df = df[outlier_mask]
+        if not outlier_df.empty:
+            anomalies = outlier_df.head(10).to_dict(orient="records")
 
     return {
         "metadata": {
             "total_records": len(df),
             "total_fields": len(df.columns),
-            "data_health_index": round(health_index, 1),
+            "data_health_index": max(0.0, health_index),
             "missing_cells": missing_cells,
-            "duplicate_rows": duplicates,
+            "duplicate_rows": dup_rows,
             "revenue_column": revenue_col,
             "cost_column": cost_col,
             "category_column": category_col
         },
         "totals": {
-            "total_revenue": tot_rev,
-            "total_costs": tot_cost,
+            "total_revenue": total_rev,
+            "total_costs": total_cost,
             "net_profit": net_profit,
-            "profit_margin": round(profit_margin, 2)
+            "profit_margin": round(margin, 2)
         },
-        "revenue_by_category": revenue_by_category,
+        "revenue_by_category": category_rev,
         "leaderboards": {
             "top_items": top_items,
             "bottom_items": bottom_items

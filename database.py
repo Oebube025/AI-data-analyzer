@@ -1,15 +1,14 @@
 """
-Persistent Session & Database Manager (database.py)
-Stores saved scenarios and workspace history using DuckDB.
-Contains ZERO Streamlit imports.
+Persistent Session Database (database.py)
+Stores saved business scenarios using DuckDB.
+Contains ZERO Streamlit dependencies.
 """
 
 import duckdb
-import pandas as pd
 import json
 import os
 
-DB_FILE = "executive_intelligence.duckdb"
+DB_FILE = "sme_intelligence.duckdb"
 
 def init_db():
     conn = duckdb.connect(DB_FILE)
@@ -30,7 +29,6 @@ def init_db():
 def save_scenario_db(session_id: str, name: str, res: dict):
     init_db()
     conn = duckdb.connect(DB_FILE)
-    # DuckDB autoincrement sequence handling
     conn.execute("""
         INSERT INTO saved_scenarios (session_id, scenario_name, revenue, costs, net_profit, margin, details)
         VALUES (?, ?, ?, ?, ?, ?, ?)

@@ -1,7 +1,6 @@
 """
-Executive Data Intelligence Suite - Streamlit Frontend (Phase 5 Complete)
-Powered by Centralized Facts, 12-Slide Decks, 6-Section AI, What-If Simulators,
-and DuckDB Session Persistence with Secure Authentication.
+SME Data Intelligence Suite - Streamlit Frontend (App1.py)
+Automated CFO Briefs, Bank-Ready Decks, and What-If Calculators for Small Businesses.
 """
 
 import streamlit as st
@@ -13,14 +12,14 @@ import io
 import hashlib
 import uuid
 
-from analysis import analyze_dataset
+from analysis import analyze_dataset, auto_detect_columns
 from deck_builder import create_executive_deck
 from simulator import calculate_scenario, generate_sensitivity_matrix
 from database import init_db, save_scenario_db, load_scenarios_db
 
 st.set_page_config(
-    page_title="Executive Intelligence Suite | Pilot Beta",
-    page_icon="📊",
+    page_title="AI CFO Suite for Small Business",
+    page_icon="💼",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -29,8 +28,8 @@ st.markdown("""
 <style>
     .stApp { background-color: #0f172a; color: #e2e8f0; }
     section[data-testid="stSidebar"] { background-color: #090d16; border-right: 1px solid #1e293b; }
-    .saas-card { background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); border: 1px solid #334155; padding: 28px; border-radius: 12px; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.4); margin-bottom: 20px; }
-    .beta-badge { background-color: #2563eb; color: #ffffff; font-size: 0.75rem; font-weight: 700; padding: 3px 10px; border-radius: 6px; vertical-align: middle; margin-left: 8px; }
+    .saas-card { background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); border: 1px solid #334155; padding: 24px; border-radius: 12px; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.4); margin-bottom: 20px; }
+    .sme-badge { background-color: #10b981; color: #ffffff; font-size: 0.75rem; font-weight: 700; padding: 3px 10px; border-radius: 6px; vertical-align: middle; margin-left: 8px; }
     h1, h2, h3 { color: #f8fafc; letter-spacing: -0.02em; }
     .stButton>button { background-color: #2563eb; color: white; border: none; border-radius: 8px; font-weight: 600; padding: 0.6rem 1.2rem; width: 100%; transition: all 0.2s ease; }
     .stButton>button:hover { background-color: #1d4ed8; box-shadow: 0 4px 12px rgba(37,99,235,0.4); }
@@ -53,37 +52,41 @@ if "authenticated" not in st.session_state:
     st.session_state["authenticated"] = False
     st.session_state["session_id"] = str(uuid.uuid4())[:8]
 
+# Presets state initialization
+if "sim_price" not in st.session_state: st.session_state["sim_price"] = 5
+if "sim_vol" not in st.session_state: st.session_state["sim_vol"] = 0
+if "sim_vc" not in st.session_state: st.session_state["sim_vc"] = 0
+
+# LOGIN / AUTH GATE
 if not st.session_state["authenticated"]:
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
-        st.markdown("<br><br><h1 style='text-align: center;'>Executive Intelligence Suite <span class='beta-badge'>PILOT BETA V7.0</span></h1>", unsafe_allow_html=True)
-        st.markdown("<p style='text-align: center; color: #94a3b8; margin-bottom: 30px;'>Secure Authentication • Persistent DuckDB Sessions • 6-Section AI</p>", unsafe_allow_html=True)
+        st.markdown("<br><br><h1 style='text-align: center;'>AI CFO Suite <span class='sme-badge'>FOR SMALL BUSINESS</span></h1>", unsafe_allow_html=True)
+        st.markdown("<p style='text-align: center; color: #94a3b8; margin-bottom: 30px;'>Automated Financial Audits • Bank-Ready Decks • On-Demand CFO Advice</p>", unsafe_allow_html=True)
         
         with st.form("auth_form"):
-            st.markdown("### 🔐 Secure Login")
-            user_key = st.text_input("Enter Access Token / Password", type="password")
-            submitted = st.form_submit_button("🚀 Launch Executive Workspace")
+            st.markdown("### 🔐 Enter Business Workspace")
+            user_key = st.text_input("Access Key / Passcode", type="password")
+            submitted = st.form_submit_button("🚀 Launch Business Dashboard")
             if submitted:
                 if user_key == BACKEND_SECRET_KEY or user_key == "demo-beta-2026":
                     st.session_state["authenticated"] = True
                     st.rerun()
                 else:
-                    st.error("❌ Invalid access token.")
+                    st.error("❌ Invalid access key.")
         st.stop()
 
-# MAIN WORKSPACE
+# WORKSPACE
 is_online = check_backend_status(BACKEND_SECRET_KEY)
 if not is_online:
-    st.warning("⚠️ Backend API is waking up or offline. Please check your Render service status.")
+    st.warning("⚠️ AI Advisor Backend is starting up... Please wait a moment.")
 
-uploaded = st.file_uploader("📁 Upload Executive Dataset (.csv or .xlsx - Max 10MB)", type=["csv", "xlsx"])
+uploaded = st.file_uploader("📁 Upload Monthly Business File (.csv or .xlsx - QuickBooks, Shopify, Excel)", type=["csv", "xlsx"])
 
 if uploaded is not None:
     file_bytes = uploaded.getvalue()
-    file_size_mb = len(file_bytes) / (1024 * 1024)
-
-    if file_size_mb > 10:
-        st.error("❌ File size exceeds the strict 10MB limit.")
+    if len(file_bytes) / (1024 * 1024) > 10:
+        st.error("❌ File size exceeds the 10MB limit.")
         st.stop()
 
     file_hash = hashlib.md5(file_bytes).hexdigest()
@@ -101,37 +104,71 @@ if uploaded is not None:
 
             st.session_state["active_df"] = df.copy()
             st.session_state.pop("deck_bytes", None)
+            
+            # Auto-detect columns upon fresh upload
+            st.session_state["detected_cols"] = auto_detect_columns(df)
         except Exception as e:
-            st.error(f"Error parsing file: {e}")
+            st.error(f"Error reading file: {e}")
             st.stop()
 
     df = st.session_state["active_df"]
+    auto_cols = st.session_state.get("detected_cols", auto_detect_columns(df))
 
-    st.sidebar.markdown("### ⚙️ Executive Mapping")
-    currency = st.sidebar.selectbox("Display Currency", ["₦", "$", "€", "£"])
+    # Sidebar: Auto-populated controls
+    st.sidebar.markdown("### ⚙️ Business Settings")
+    currency = st.sidebar.selectbox("Currency Symbol", ["$", "₦", "€", "£"])
     
     num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
     cat_cols = df.select_dtypes(include=['object', 'category', 'bool']).columns.tolist()
-    date_cols = [c for c in df.columns if any(k in c.lower() for k in ['date', 'time', 'year', 'month', 'period'])]
+    date_cols = [c for c in df.columns if any(k in c.lower() for k in ['date', 'time', 'year', 'month', 'period', 'day'])]
+
+    sel_rev = st.sidebar.selectbox(
+        "Sales / Revenue Column", 
+        num_cols, 
+        index=num_cols.index(auto_cols["revenue_col"]) if auto_cols["revenue_col"] in num_cols else 0
+    )
     
-    valid_nums = [c for c in num_cols if not any(k in c.lower() for k in ['id', 'code', 'year'])]
-    sel_rev = st.sidebar.selectbox("Revenue Column", valid_nums if valid_nums else num_cols)
-    sel_cost = st.sidebar.selectbox("Cost Column", ["None"] + (valid_nums if valid_nums else num_cols))
-    sel_cat = st.sidebar.selectbox("Category / Group Column", ["None"] + cat_cols)
-    sel_date = st.sidebar.selectbox("Date / Time Column (Optional)", ["None"] + date_cols)
+    cost_options = ["None"] + num_cols
+    sel_cost = st.sidebar.selectbox(
+        "Expenses / Costs Column", 
+        cost_options, 
+        index=cost_options.index(auto_cols["cost_col"]) if auto_cols["cost_col"] in cost_options else 0
+    )
+    
+    cat_options = ["None"] + cat_cols
+    sel_cat = st.sidebar.selectbox(
+        "Product / Client / Group Column", 
+        cat_options, 
+        index=cat_options.index(auto_cols["category_col"]) if auto_cols["category_col"] in cat_options else 0
+    )
+    
+    date_options = ["None"] + date_cols
+    sel_date = st.sidebar.selectbox(
+        "Date Column (Optional)", 
+        date_options, 
+        index=date_options.index(auto_cols["date_col"]) if auto_cols["date_col"] in date_options else 0
+    )
 
     facts = analyze_dataset(df, revenue_col=sel_rev, cost_col=sel_cost, category_col=sel_cat)
 
     st.sidebar.markdown("---")
-    st.sidebar.markdown(f"### 👤 Tenant: `{st.session_state['session_id']}`")
-    if st.sidebar.button("🔒 Lock Session"):
+    st.sidebar.markdown(f"### 👤 Business Workspace: `{st.session_state['session_id']}`")
+    if st.sidebar.button("🔒 Exit Workspace"):
         st.session_state["authenticated"] = False
         st.rerun()
 
-    tabs = st.tabs(["📊 Command Center", "📈 Trends & Leaderboard", "🔍 Data Health & Anomalies", "🎛️ What-If Simulator", "🧠 AI Advisory", "📈 Boardroom Deck", "📝 Feedback"])
+    # SME Plain-English Workspace Tabs
+    tabs = st.tabs([
+        "💰 Cash & Profit Overview", 
+        "🏆 Top Products & Sales", 
+        "🚨 Red Flags & Audit", 
+        "🧮 Pricing Calculator", 
+        "🧠 AI Fractional CFO Brief", 
+        "📊 Bank & Investor Pitch Deck"
+    ])
 
-    with tabs[0]: # Command Center
-        st.subheader("Executive Financial Command Center")
+    with tabs[0]: # Cash & Profit Overview
+        st.subheader("Monthly Cash & Profit Summary")
         if facts["warnings"]:
             for warning in facts["warnings"]:
                 st.warning(f"⚠️ {warning}")
@@ -142,21 +179,20 @@ if uploaded is not None:
         margin = facts["totals"]["profit_margin"]
         
         c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Total Revenue", f"{currency}{tot_rev:,.2f}")
-        c2.metric("Total Costs", f"{currency}{tot_cost:,.2f}")
-        c3.metric("Net Profit", f"{currency}{profit:,.2f}")
+        c1.metric("Total Money In (Sales)", f"{currency}{tot_rev:,.2f}")
+        c2.metric("Total Money Out (Costs)", f"{currency}{tot_cost:,.2f}")
+        c3.metric("Take-Home Net Profit", f"{currency}{profit:,.2f}")
         c4.metric("Profit Margin", f"{margin:.1f}%")
         
         st.markdown("---")
-        
         gcol1, gcol2 = st.columns(2)
         with gcol1:
             fig_overview = px.bar(
-                x=["Revenue", "Costs", "Net Profit"],
+                x=["Sales", "Costs", "Net Profit"],
                 y=[tot_rev, tot_cost, profit],
-                title="Financial Overview Breakdown",
-                labels={"x": "Metric", "y": f"Amount ({currency})"},
-                color=["Revenue", "Costs", "Net Profit"],
+                title="Sales vs. Expenses Breakdown",
+                labels={"x": "Category", "y": f"Amount ({currency})"},
+                color=["Sales", "Costs", "Net Profit"],
                 template="plotly_dark"
             )
             st.plotly_chart(fig_overview, use_container_width=True)
@@ -168,7 +204,7 @@ if uploaded is not None:
                     pie_df.head(6), 
                     names=sel_cat, 
                     values=sel_rev, 
-                    title=f"Top {sel_cat} Revenue Share",
+                    title=f"Top {sel_cat} Share of Sales",
                     template="plotly_dark",
                     hole=0.4
                 )
@@ -177,80 +213,101 @@ if uploaded is not None:
                 fig_hist = px.histogram(df, x=sel_rev, title=f"Distribution of {sel_rev}", template="plotly_dark")
                 st.plotly_chart(fig_hist, use_container_width=True)
 
-        st.markdown("### Dataset Preview")
+        st.markdown("### Uploaded Data Preview")
         st.dataframe(df.head(10), use_container_width=True)
 
-    with tabs[1]: # Trends & Leaderboard
-        st.subheader("Performance Trends & Leaderboards")
-        if sel_date != "None" and sel_date in df.columns and sel_rev in df.columns:
+    with tabs[1]: # Top Products & Sales
+        st.subheader("Sales Trends & Leaderboards")
+        if sel_date != "None" and sel_date in df.columns:
             trend_df = df.groupby(sel_date)[sel_rev].sum().reset_index()
-            fig_trend = px.line(trend_df, x=sel_date, y=sel_rev, title=f"{sel_rev} Trend Over Time", markers=True, template="plotly_dark")
+            fig_trend = px.line(trend_df, x=sel_date, y=sel_rev, title=f"{sel_rev} Over Time", markers=True, template="plotly_dark")
             st.plotly_chart(fig_trend, use_container_width=True)
 
         if sel_cat != "None" and facts["revenue_by_category"]:
             grouped_df = pd.DataFrame(list(facts["revenue_by_category"].items()), columns=[sel_cat, sel_rev])
             col_t1, col_t2 = st.columns(2)
             with col_t1:
-                st.markdown("#### Top Categories by Revenue")
+                st.markdown("#### Top Revenue Contributors")
                 st.dataframe(grouped_df.head(10), use_container_width=True)
             with col_t2:
-                fig_bar = px.bar(grouped_df.head(10), x=sel_cat, y=sel_rev, title=f"Top 10 {sel_cat} by {sel_rev}", template="plotly_dark")
+                fig_bar = px.bar(grouped_df.head(10), x=sel_cat, y=sel_rev, title=f"Top 10 {sel_cat} by Revenue", template="plotly_dark")
                 st.plotly_chart(fig_bar, use_container_width=True)
 
-    with tabs[2]: # Data Health & Anomalies
-        st.subheader("Data Quality Audit & Anomaly Detection")
+    with tabs[2]: # Red Flags & Audit
+        st.subheader("Data Health Check & Red Flag Audit")
         dh1, dh2, dh3 = st.columns(3)
-        dh1.metric("Data Health Index", f"{facts['metadata']['data_health_index']}%")
-        dh2.metric("Missing Cells", f"{facts['metadata']['missing_cells']:,}")
-        dh3.metric("Duplicate Rows", f"{facts['metadata']['duplicate_rows']:,}")
+        dh1.metric("Data Quality Score", f"{facts['metadata']['data_health_index']}%")
+        dh2.metric("Blank / Missing Cells", f"{facts['metadata']['missing_cells']:,}")
+        dh3.metric("Duplicate Entries", f"{facts['metadata']['duplicate_rows']:,}")
 
         if facts["anomalies"]:
-            st.markdown("##### Detected Outliers")
+            st.markdown("##### 🚨 Unusual Transactions / Potential Outliers")
             st.dataframe(pd.DataFrame(facts["anomalies"]).head(5), use_container_width=True)
         else:
-            st.success("No significant outliers detected.")
+            st.success("✅ No suspicious transaction outliers detected.")
 
-    with tabs[3]: # What-If Simulator (DuckDB Persistent)
-        st.subheader("Dynamic What-If Financial Scenario & Sensitivity Modeling")
-        st.caption("Model scenarios and store them permanently in your DuckDB session database.")
+    with tabs[3]: # Pricing Calculator
+        st.subheader("Business Growth & Price Hike Calculator")
+        st.caption("Use preset buttons or manual sliders to see how price increases or cost cuts affect your profit.")
         
+        st.markdown("#### ⚡ Quick Business Scenarios")
+        col_p1, col_p2, col_p3 = st.columns(3)
+        if col_p1.button("📈 5% Price Increase"):
+            st.session_state["sim_price"] = 5
+            st.session_state["sim_vol"] = 0
+            st.session_state["sim_vc"] = 0
+            st.rerun()
+
+        if col_p2.button("🛍️ Sale Boost (+20% Volume, -5% Price)"):
+            st.session_state["sim_price"] = -5
+            st.session_state["sim_vol"] = 20
+            st.session_state["sim_vc"] = 0
+            st.rerun()
+
+        if col_p3.button("✂️ 10% Cost Reduction"):
+            st.session_state["sim_price"] = 0
+            st.session_state["sim_vol"] = 0
+            st.session_state["sim_vc"] = -10
+            st.rerun()
+
+        st.markdown("---")
         col_w1, col_w2 = st.columns(2)
         with col_w1:
-            scenario_name = st.text_input("Scenario Name", value=f"Scenario Model 1")
-            price_adj = st.slider("Price Adjustment (%)", -50, 50, 5)
-            volume_adj = st.slider("Volume Adjustment (%)", -50, 50, 0)
+            scenario_name = st.text_input("Scenario Label", value="Growth Plan 1")
+            price_adj = st.slider("Price Adjustment (%)", -50, 50, value=int(st.session_state["sim_price"]))
+            volume_adj = st.slider("Sales Volume Shift (%)", -50, 50, value=int(st.session_state["sim_vol"]))
         with col_w2:
-            fixed_cost_change = st.number_input("Fixed Cost Adjustment (Absolute Value)", value=0.0, step=1000.0)
-            variable_cost_pct = st.slider("Variable Cost Adjustment (%)", -50, 50, 0)
+            fixed_cost_change = st.number_input("Fixed Expense Adjustment (e.g., +Rent)", value=0.0, step=500.0)
+            variable_cost_pct = st.slider("Variable Expense Shift (%)", -50, 50, value=int(st.session_state["sim_vc"]))
 
         current_res = calculate_scenario(facts["totals"], price_adj, volume_adj, fixed_cost_change, variable_cost_pct)
 
         sc1, sc2, sc3, sc4 = st.columns(4)
-        sc1.metric("Simulated Revenue", f"{currency}{current_res['revenue']:,.2f}", f"{price_adj + volume_adj}%")
-        sc2.metric("Simulated Costs", f"{currency}{current_res['costs']:,.2f}")
-        sc3.metric("Simulated Net Profit", f"{currency}{current_res['net_profit']:,.2f}", f"{current_res['profit_delta']:+,.2f}")
-        sc4.metric("Simulated Margin", f"{current_res['profit_margin']:.1f}%")
+        sc1.metric("Projected Sales", f"{currency}{current_res['revenue']:,.2f}", f"{price_adj + volume_adj}%")
+        sc2.metric("Projected Expenses", f"{currency}{current_res['costs']:,.2f}")
+        sc3.metric("Projected Net Profit", f"{currency}{current_res['net_profit']:,.2f}", f"{current_res['profit_delta']:+,.2f}")
+        sc4.metric("Projected Margin", f"{current_res['profit_margin']:.1f}%")
 
-        if st.button("💾 Save Scenario to DuckDB", type="primary"):
+        if st.button("💾 Save Plan to Workspace Database", type="primary"):
             save_scenario_db(st.session_state["session_id"], scenario_name, current_res)
-            st.success(f"Successfully saved '{scenario_name}' to DuckDB database!")
+            st.success(f"Saved '{scenario_name}' to database!")
 
         saved_db_scenarios = load_scenarios_db(st.session_state["session_id"])
         if saved_db_scenarios:
-            st.markdown("### 📊 Stored Scenarios (Persistent Database)")
+            st.markdown("### 📊 Stored Growth Models")
             st.dataframe(pd.DataFrame(saved_db_scenarios)[['scenario_name', 'revenue', 'costs', 'net_profit', 'margin']], use_container_width=True)
 
         st.markdown("---")
-        st.markdown("### 📈 Profit Sensitivity Matrix")
+        st.markdown("### 📈 Estimated Take-Home Profit Matrix (Price vs. Sales Volume)")
         sens_matrix = generate_sensitivity_matrix(facts["totals"])
         st.dataframe(pd.DataFrame(sens_matrix), use_container_width=True)
 
-    with tabs[4]: # AI Advisory (DuckDB Scenarios Integrated)
-        st.subheader("Executive AI Business Advisor")
-        st.caption("Generate grounded 6-section advisory reports incorporating your persistent DuckDB scenarios.")
+    with tabs[4]: # AI Fractional CFO Brief
+        st.subheader("On-Demand AI Fractional CFO Advisor")
+        st.caption("Generate a plain-English, 6-section CFO brief evaluating your financial health and saved scenarios.")
         
-        if st.button("Generate Extensive 6-Section AI Advisory Report", type="primary"):
-            with st.spinner("🤖 Analyzing facts & persistent DuckDB scenarios via Cohere AI..."):
+        if st.button("Generate AI CFO Advice Brief", type="primary"):
+            with st.spinner("🤖 Analyzing business data & scenarios..."):
                 try:
                     db_scenarios = load_scenarios_db(st.session_state["session_id"])
                     res = requests.post(
@@ -265,7 +322,7 @@ if uploaded is not None:
                         res_json = {"detail": res.text or "Server error."}
 
                     if res.status_code == 200:
-                        st.markdown("### 📋 Comprehensive Boardroom Advisory Report")
+                        st.markdown("### 📋 Monthly Business Intelligence Brief")
                         st.markdown('<div class="saas-card">', unsafe_allow_html=True)
                         st.markdown(res_json.get("advisory", ""))
                         st.markdown('</div>', unsafe_allow_html=True)
@@ -274,28 +331,26 @@ if uploaded is not None:
                 except Exception as e:
                     st.error(f"Connection error: {e}")
 
-    with tabs[5]: # Boardroom Deck
-        st.subheader("Automated 12-Slide Strategic Boardroom Presentation")
-        if st.button("Generate Strategic Boardroom Deck (.pptx)", type="primary"):
-            with st.spinner("📊 Building professional 12-slide strategic boardroom deck..."):
+    with tabs[5]: # Bank & Investor Pitch Deck
+        st.subheader("Automated Presentation Deck (.pptx)")
+        st.caption("Generate a professional 12-slide presentation deck ready for bank loan applications, partners, or local investors.")
+        
+        if st.button("Generate Pitch Deck (.pptx)", type="primary"):
+            with st.spinner("📊 Building professional presentation deck..."):
                 try:
                     deck_bytes = create_executive_deck(facts, currency=currency, filename=uploaded.name)
                     st.session_state["deck_bytes"] = deck_bytes
-                    st.success("✅ Strategic boardroom deck generated successfully!")
+                    st.success("✅ Presentation deck generated successfully!")
                 except Exception as e:
-                    st.error(f"Error generating presentation: {e}")
+                    st.error(f"Error generating presentation deck: {e}")
 
         if "deck_bytes" in st.session_state:
             st.download_button(
-                label="📥 Download Strategic Boardroom Deck (.pptx)",
+                label="📥 Download Bank-Ready Deck (.pptx)",
                 data=st.session_state["deck_bytes"],
-                file_name="Executive_Boardroom_Deck.pptx",
+                file_name="Business_Financial_Overview.pptx",
                 mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
                 type="primary"
             )
-
-    with tabs[6]: # Feedback
-        st.subheader("Pilot Beta Feedback & Support")
-        st.markdown("👉 **[Submit Feedback via Google Forms](https://forms.gle/your-feedback-link)**")
 else:
-    st.info("👋 Welcome to App1! Please log in and upload your dataset above to initialize the executive suite.")
+    st.info("👋 Welcome! Please upload your monthly business spreadsheet (.csv or .xlsx) above to begin.")

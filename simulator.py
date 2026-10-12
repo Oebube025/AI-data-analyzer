@@ -1,13 +1,13 @@
 """
-Advanced Financial Scenario & Sensitivity Engine (simulator.py)
-Handles multi-scenario calculations and sensitivity matrices.
-Contains ZERO Streamlit imports.
+SME What-If Simulator & Price Calculator (simulator.py)
+Calculates business growth scenarios and profit sensitivity grids.
+Contains ZERO Streamlit dependencies.
 """
 
 def calculate_scenario(totals: dict, price_adj: float, volume_adj: float, fixed_cost_change: float, variable_cost_pct: float) -> dict:
-    base_rev = totals["total_revenue"]
-    base_cost = totals["total_costs"]
-    base_profit = totals["net_profit"]
+    base_rev = totals.get("total_revenue", 0.0)
+    base_cost = totals.get("total_costs", 0.0)
+    base_profit = totals.get("net_profit", 0.0)
 
     sim_rev = base_rev * (1 + price_adj / 100.0) * (1 + volume_adj / 100.0)
     sim_cost = (base_cost * (1 + variable_cost_pct / 100.0)) + fixed_cost_change
@@ -27,20 +27,20 @@ def calculate_scenario(totals: dict, price_adj: float, volume_adj: float, fixed_
     }
 
 def generate_sensitivity_matrix(totals: dict) -> list:
-    """Generates a matrix of net profit outcomes across price and volume variations."""
-    price_steps = [-20, -10, 0, 10, 20]
-    volume_steps = [-20, -10, 0, 10, 20]
+    """Generates a matrix showing estimated take-home profit across price vs sales volume shifts."""
+    price_steps = [-15, -5, 0, 5, 15]
+    volume_steps = [-15, -5, 0, 5, 15]
     
     matrix = []
-    base_rev = totals["total_revenue"]
-    base_cost = totals["total_costs"]
+    base_rev = totals.get("total_revenue", 0.0)
+    base_cost = totals.get("total_costs", 0.0)
 
     for p in price_steps:
-        row = {"Price Adj (%)": f"{p:+d}%"}
+        row = {"Price Shift (%)": f"{p:+d}%"}
         for v in volume_steps:
             sim_rev = base_rev * (1 + p / 100.0) * (1 + v / 100.0)
             sim_profit = sim_rev - base_cost
-            row[f"Vol {v:+d}%"] = sim_profit
+            row[f"Sales Vol {v:+d}%"] = sim_profit
         matrix.append(row)
         
     return matrix
