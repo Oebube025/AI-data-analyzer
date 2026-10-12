@@ -1,6 +1,6 @@
 """
-Executive Data Intelligence Suite - Streamlit Frontend (Phase 1 Integrated)
-Powered by Centralized Fact Sheet (analysis.py)
+Executive Data Intelligence Suite - Streamlit Frontend (Phase 2 Integrated)
+Powered by Centralized Fact Sheet (analysis.py) and Multi-Slide Deck Generator (deck_builder.py)
 """
 
 import streamlit as st
@@ -10,12 +10,9 @@ import plotly.express as px
 import requests
 import io
 import hashlib
-from pptx import Presentation
-from pptx.chart.data import CategoryChartData
-from pptx.enum.chart import XL_CHART_TYPE
-from pptx.util import Inches
 
 from analysis import analyze_dataset
+from deck_builder import create_executive_deck
 
 st.set_page_config(
     page_title="Executive Intelligence Suite | Pilot Beta",
@@ -53,8 +50,8 @@ if "app_state" not in st.session_state:
 if st.session_state["app_state"] == "welcome":
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
-        st.markdown("<br><br><h1 style='text-align: center;'>Executive Intelligence Suite <span class='beta-badge'>PILOT BETA V6.3</span></h1>", unsafe_allow_html=True)
-        st.markdown("<p style='text-align: center; color: #94a3b8; margin-bottom: 30px;'>Centralized Fact Sheet Architecture & Boardroom AI</p>", unsafe_allow_html=True)
+        st.markdown("<br><br><h1 style='text-align: center;'>Executive Intelligence Suite <span class='beta-badge'>PILOT BETA V6.4</span></h1>", unsafe_allow_html=True)
+        st.markdown("<p style='text-align: center; color: #94a3b8; margin-bottom: 30px;'>Multi-Slide Boardroom Decks & AI Advisory</p>", unsafe_allow_html=True)
         st.markdown('<div class="saas-card">', unsafe_allow_html=True)
         if st.button("🚀 Launch Executive Workspace", type="primary"):
             st.session_state["app_state"] = "main"
@@ -93,6 +90,8 @@ if uploaded is not None:
                 df = pd.read_excel(io.BytesIO(file_bytes))
 
             st.session_state["active_df"] = df.copy()
+            # Reset deck state on new file upload
+            st.session_state.pop("deck_bytes", None)
         except Exception as e:
             st.error(f"Error parsing file: {e}")
             st.stop()
@@ -111,7 +110,7 @@ if uploaded is not None:
     sel_cost = st.sidebar.selectbox("Cost Column", ["None"] + (valid_nums if valid_nums else num_cols))
     sel_cat = st.sidebar.selectbox("Category / Group Column", ["None"] + cat_cols)
 
-    # GENERATE CENTRALIZED FACT SHEET (Single Source of Truth)
+    # GENERATE CENTRALIZED FACT SHEET (Phase 1)
     facts = analyze_dataset(df, revenue_col=sel_rev, cost_col=sel_cost, category_col=sel_cat)
 
     st.sidebar.markdown("---")
@@ -179,6 +178,10 @@ if uploaded is not None:
             fixed_cost_change = st.number_input("Fixed Cost Adjustment (Absolute Value)", value=0.0, step=1000.0)
             variable_cost_pct = st.slider("Variable Cost Adjustment (%)", -50, 50, 0)
 
+        tot_rev = facts["totals"]["total_revenue"]
+        tot_cost = facts["totals"]["total_costs"]
+        profit = facts["totals"]["net_profit"]
+
         if st.button("Calculate Scenario", type="primary"):
             sim_rev = tot_rev * (1 + price_adj / 100.0) * (1 + volume_adj / 100.0)
             sim_cost = (tot_cost * (1 + variable_cost_pct / 100.0)) + fixed_cost_change
@@ -193,7 +196,7 @@ if uploaded is not None:
         st.subheader("Executive AI Business Advisor")
         st.caption("Generate professional AI insights based on your verified dataset statistics.")
         if st.button("Generate AI Advisory Report", type="primary"):
-            stats_summary = f"Dataset: {uploaded.name}, Records: {facts['metadata']['total_records']:,}, Total Revenue: {tot_rev:,.2f}, Total Costs: {tot_cost:,.2f}, Net Profit: {profit:,.2f}, Margin: {margin:.1f}%"
+            stats_summary = f"Dataset: {uploaded.name}, Records: {facts['metadata']['total_records']:,}, Total Revenue: {facts['totals']['total_revenue']:,.2f}, Total Costs: {facts['totals']['total_costs']:,.2f}, Net Profit: {facts['totals']['net_profit']:,.2f}, Margin: {facts['totals']['profit_margin']:.1f}%"
             with st.spinner("🤖 Generating executive advisory report via Cohere AI..."):
                 try:
                     res = requests.post(
@@ -210,25 +213,32 @@ if uploaded is not None:
                 except Exception as e:
                     st.error(f"Connection error: {e}")
 
-    with tabs[5]: # Boardroom Deck
-        st.subheader("Automated Boardroom Presentation Generator")
-        st.caption("Compile your verified financial metrics directly into an executive PowerPoint presentation.")
-        if st.button("Generate PowerPoint Presentation"):
-            prs = Presentation()
-            slide = prs.slides.add_slide(prs.slide_layouts[6])
-            chart_data = CategoryChartData()
-            chart_data.categories = ["Revenue", "Costs", "Net Profit"]
-            chart_data.add_series("Financials", (tot_rev, tot_cost, profit))
-            slide.shapes.add_chart(XL_CHART_TYPE.COLUMN_CLUSTERED, Inches(1), Inches(1), Inches(10), Inches(5), chart_data)
-            
-            buf = io.BytesIO()
-            prs.save(buf)
-            buf.seek(0)
-            st.download_button("📥 Download Executive Presentation (.pptx)", data=buf, file_name="Executive_Presentation.pptx", mime="application/vnd.openxmlformats-officedocument.presentationml.presentation")
+    with tabs[5]: # Boardroom Deck (Phase 2 Multi-Slide Generator)
+        st.subheader("Automated Multi-Slide Boardroom Presentation Generator")
+        st.caption("Compile your verified financial metrics directly into a professional multi-slide executive PowerPoint presentation with native charts.")
+        
+        if st.button("Generate Boardroom Deck (.pptx)", type="primary"):
+            with st.spinner("📊 Building professional multi-slide presentation..."):
+                try:
+                    deck_bytes = create_executive_deck(facts, currency=currency)
+                    st.session_state["deck_bytes"] = deck_bytes
+                    st.success("✅ Executive presentation generated successfully!")
+                except Exception as e:
+                    st.error(f"Error generating presentation: {e}")
+
+        # Render download button outside the generation button block so it persists across reruns
+        if "deck_bytes" in st.session_state:
+            st.download_button(
+                label="📥 Download Executive Boardroom Deck (.pptx)",
+                data=st.session_state["deck_bytes"],
+                file_name="Executive_Boardroom_Deck.pptx",
+                mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                type="primary"
+            )
 
     with tabs[6]: # Feedback
         st.subheader("Pilot Beta Feedback & Support")
-        st.markdown("We value your input as an initial tester for App1 v6.3!")
+        st.markdown("We value your input as an initial tester for App1 v6.4!")
         st.markdown("👉 **[Submit Feedback via Google Forms](https://forms.gle/your-feedback-link)**")
 else:
     st.info("👋 Welcome to App1! Please upload your dataset above to initialize the executive suite.")
