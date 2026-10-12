@@ -212,31 +212,59 @@ if uploaded is not None:
                 fig_scatter = px.scatter(df, x=sel_cost, y=sel_rev, title="Cost vs. Revenue Correlation", template="plotly_dark")
                 st.plotly_chart(fig_scatter, use_container_width=True)
 
-    with tabs[3]: # What-If Simulator
-        st.subheader("Dynamic What-If Financial Scenario Modeling")
-        st.caption("Adjust pricing, volume, and cost structures to model real-time profit sensitivity.")
+    with tabs[3]: # What-If Simulator (Phase 4 Advanced)
+        st.subheader("Dynamic What-If Financial Scenario & Sensitivity Modeling")
+        st.caption("Model multi-variable pricing, volume, and cost scenarios, save custom models, and analyze profit sensitivity.")
         
+        if "saved_scenarios" not in st.session_state:
+            st.session_state["saved_scenarios"] = []
+
         col_w1, col_w2 = st.columns(2)
         with col_w1:
-            price_adj = st.slider("Price Adjustment (%)", -50, 50, 5)
-            volume_adj = st.slider("Volume Adjustment (%)", -50, 50, 0)
+            scenario_name = st.text_input("Scenario Name", value=f"Scenario {len(st.session_state['saved_scenarios']) + 1}")
+            price_adj = st.slider("Price Adjustment (%)", -50, 50, 5, key="sim_price")
+            volume_adj = st.slider("Volume Adjustment (%)", -50, 50, 0, key="sim_vol")
         with col_w2:
-            fixed_cost_change = st.number_input("Fixed Cost Adjustment (Absolute Value)", value=0.0, step=1000.0)
-            variable_cost_pct = st.slider("Variable Cost Adjustment (%)", -50, 50, 0)
+            fixed_cost_change = st.number_input("Fixed Cost Adjustment (Absolute Value)", value=0.0, step=1000.0, key="sim_fc")
+            variable_cost_pct = st.slider("Variable Cost Adjustment (%)", -50, 50, 0, key="sim_vc")
 
-        tot_rev = facts["totals"]["total_revenue"]
-        tot_cost = facts["totals"]["total_costs"]
-        profit = facts["totals"]["net_profit"]
+        from simulator import calculate_scenario, generate_sensitivity_matrix
 
-        if st.button("Calculate Scenario", type="primary"):
-            sim_rev = tot_rev * (1 + price_adj / 100.0) * (1 + volume_adj / 100.0)
-            sim_cost = (tot_cost * (1 + variable_cost_pct / 100.0)) + fixed_cost_change
-            sim_profit = sim_rev - sim_cost
+        current_res = calculate_scenario(facts["totals"], price_adj, volume_adj, fixed_cost_change, variable_cost_pct)
 
-            sc1, sc2, sc3 = st.columns(3)
-            sc1.metric("Simulated Revenue", f"{currency}{sim_rev:,.2f}", f"{price_adj + volume_adj}%")
-            sc2.metric("Simulated Costs", f"{currency}{sim_cost:,.2f}")
-            sc3.metric("Simulated Net Profit", f"{currency}{sim_profit:,.2f}", f"{sim_profit - profit:+,.2f}")
+        sc1, sc2, sc3, sc4 = st.columns(4)
+        sc1.metric("Simulated Revenue", f"{currency}{current_res['revenue']:,.2f}", f"{price_adj + volume_adj}%")
+        sc2.metric("Simulated Costs", f"{currency}{current_res['costs']:,.2f}")
+        sc3.metric("Simulated Net Profit", f"{currency}{current_res['net_profit']:,.2f}", f"{current_res['profit_delta']:+,.2f}")
+        sc4.metric("Simulated Margin", f"{current_res['profit_margin']:.1f}%")
+
+        col_btn1, col_btn2 = st.columns([1, 4])
+        with col_btn1:
+            if st.button("💾 Save Scenario", type="primary"):
+                st.session_state["saved_scenarios"].append({
+                    "Name": scenario_name,
+                    "Revenue": current_res["revenue"],
+                    "Costs": current_res["costs"],
+                    "Net Profit": current_res["net_profit"],
+                    "Margin (%)": current_res["profit_margin"],
+                    "Price/Vol Adj": f"{price_adj}% / {volume_adj}%"
+                })
+                st.success(f"Saved '{scenario_name}'!")
+        with col_btn2:
+            if st.session_state["saved_scenarios"]:
+                if st.button("🗑️ Clear Saved Scenarios"):
+                    st.session_state["saved_scenarios"] = []
+                    st.rerun()
+
+        if st.session_state["saved_scenarios"]:
+            st.markdown("### 📊 Saved Scenarios Comparison")
+            scen_df = pd.DataFrame(st.session_state["saved_scenarios"])
+            st.dataframe(scen_df, use_container_width=True)
+
+        st.markdown("---")
+        st.markdown("### 📈 Profit Sensitivity Matrix (Price vs. Volume)")
+        sens_matrix = generate_sensitivity_matrix(facts["totals"])
+        st.dataframe(pd.DataFrame(sens_matrix), use_container_width=True)
 
     with tabs[4]: # AI Advisory (6-Section Strategic Report)
         st.subheader("Executive AI Business Advisor")
