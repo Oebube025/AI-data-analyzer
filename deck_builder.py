@@ -1,139 +1,218 @@
 """
-Professional Boardroom Deck Generator (deck_builder.py)
-Generates a complete 12-slide strategic presentation based on active dataset facts.
+Business Report Deck Generator (deck_builder.py)
+Builds a real 12-slide strategic deck from the verified fact sheet.
 Contains ZERO Streamlit imports.
 """
 
-from pptx import Presentation
-from pptx.util import Inches, Pt
-from pptx.enum.chart import XL_CHART_TYPE
-from pptx.chart.data import CategoryChartData
-from pptx.dml.color import RGBColor
 import io
 
-THEME_BG = RGBColor(15, 23, 42)      # Dark Slate (#0f172a)
-THEME_CARD = RGBColor(30, 41, 59)    # Lighter Slate (#1e293b)
-THEME_TEXT = RGBColor(248, 250, 252) # Off White (#f8fafc)
-THEME_MUTED = RGBColor(148, 163, 184)# Gray (#94a3b8)
-THEME_ACCENT = RGBColor(37, 99, 235) # Blue (#2563eb)
+import pandas as pd
+from pptx import Presentation
+from pptx.chart.data import CategoryChartData
+from pptx.dml.color import RGBColor
+from pptx.enum.chart import XL_CHART_TYPE
+from pptx.util import Inches, Pt
 
-def add_header(slide, title_text, filename="Dataset"):
-    tb = slide.shapes.add_textbox(Inches(0.8), Inches(0.5), Inches(11.7), Inches(0.8))
+from analysis import derive_insights
+
+THEME_BG = RGBColor(15, 23, 42)
+THEME_TEXT = RGBColor(248, 250, 252)
+THEME_MUTED = RGBColor(148, 163, 184)
+THEME_ACCENT = RGBColor(59, 130, 246)
+
+
+def _new_slide(prs):
+    s = prs.slides.add_slide(prs.slide_layouts[6])
+    s.background.fill.solid()
+    s.background.fill.fore_color.rgb = THEME_BG
+    return s
+
+
+def _textbox(slide, x, y, w, h, items):
+    tb = slide.shapes.add_textbox(Inches(x), Inches(y), Inches(w), Inches(h))
     tf = tb.text_frame
     tf.word_wrap = True
-    p = tf.paragraphs[0]
-    p.text = title_text
-    p.font.size = Pt(24)
-    p.font.bold = True
-    p.font.color.rgb = THEME_TEXT
+    for i, (text, size, color, bold) in enumerate(items):
+        p = tf.paragraphs[0] if i == 0 else tf.add_paragraph()
+        p.text = text
+        p.font.size = Pt(size)
+        p.font.color.rgb = color
+        p.font.bold = bold
+        p.space_after = Pt(8)
+    return tb
 
-    p_sub = tf.add_paragraph()
-    p_sub.text = f"Executive Intelligence Suite (Beta)  |  {filename}"
-    p_sub.font.size = Pt(10)
-    p_sub.font.color.rgb = THEME_MUTED
 
-def create_executive_deck(facts: dict, currency: str = "₦", filename: str = "dataset.csv") -> bytes:
+def _bullets(slide, lines, x=0.8, y=1.8, w=11.7, h=4.8, size=15, color=THEME_TEXT):
+    _textbox(slide, x, y, w, h, [(f"•  {ln}", size, color, False) for ln in lines])
+
+
+def _slide(prs, title, filename):
+    s = _new_slide(prs)
+    _textbox(s, 0.8, 0.5, 11.7, 1.0, [
+        (title, 26, THEME_TEXT, True),
+        (f"Executive Intelligence Suite (Beta)  |  {filename}", 10, THEME_MUTED, False),
+    ])
+    return s
+
+
+def _chart(slide, cats, vals, x, y, w, h, line=False, name="Revenue"):
+    cd = CategoryChartData()
+    cd.categories = [str(c) for c in cats]
+    cd.add_series(name, [float(v) for v in vals])
+    kind = XL_CHART_TYPE.LINE_MARKERS if line else XL_CHART_TYPE.COLUMN_CLUSTERED
+    chart = slide.shapes.add_chart(kind, Inches(x), Inches(y), Inches(w), Inches(h), cd).chart
+    chart.has_legend = False
+    chart.font.size = Pt(11)
+    chart.font.color.rgb = THEME_TEXT
+    series = chart.plots[0].series[0]
+    if line:
+        series.format.line.color.rgb = THEME_ACCENT
+        series.smooth = False
+    else:
+        series.format.fill.solid()
+        series.format.fill.fore_color.rgb = THEME_ACCENT
+    return chart
+
+
+def _fmt_pct(v):
+    return "n/a" if v is None or pd.isna(v) else f"{v:.1f}%"
+
+
+def create_executive_deck(facts: dict, currency: str = "₦", filename: str = "dataset.csv",
+                          scenarios: list = None) -> bytes:
     prs = Presentation()
     prs.slide_width = Inches(13.333)
     prs.slide_height = Inches(7.5)
-    blank_layout = prs.slide_layouts[6]
 
-    totals = facts["totals"]
-    meta = facts["metadata"]
-    warnings = facts["warnings"]
-    top_items = facts["leaderboards"]["top_items"]
-    anomalies = facts["anomalies"]
+    t, meta, trend, conc = facts["totals"], facts["metadata"], facts["trend"], facts["concentration"]
+    cat_col, rev_col = meta["category_column"], meta["revenue_column"]
+    money = lambda v: f"{currency}{v:,.2f}"
+    insights = derive_insights(facts, currency)
+    scenarios = scenarios or []
 
-    # --- Slide 1: Title Slide ---
-    slide1 = prs.slides.add_slide(blank_layout)
-    tb1 = slide1.shapes.add_textbox(Inches(1), Inches(2.2), Inches(11.333), Inches(3))
-    tf1 = tb1.text_frame
-    tf1.word_wrap = True
-    p1 = tf1.paragraphs[0]
-    p1.text = "Board Performance Review"
-    p1.font.size = Pt(40)
-    p1.font.bold = True
-    p1.font.color.rgb = THEME_TEXT
+    # 1 Title
+    s = _new_slide(prs)
+    _textbox(s, 1, 2.4, 11.3, 3, [
+        ("Business Performance Report", 40, THEME_TEXT, True),
+        (f"Analyzed records: {meta['total_records']:,}  |  File: {filename}", 18, THEME_MUTED, False),
+    ])
 
-    p2 = tf1.add_paragraph()
-    p2.text = f"Analyzed Records: {meta['total_records']:,}  |  File: {filename}"
-    p2.font.size = Pt(18)
-    p2.font.color.rgb = THEME_MUTED
-
-    # --- Slide 2: Financial Snapshot ---
-    slide2 = prs.slides.add_slide(blank_layout)
-    add_header(slide2, "Financial Snapshot", filename)
-    
-    kpis = [
-        ("REVENUE", f"{currency}{totals['total_revenue']:,.2f}"),
-        ("COSTS", f"{currency}{totals['total_costs']:,.2f}"),
-        ("NET PROFIT", f"{currency}{totals['net_profit']:,.2f}"),
-        ("MARGIN", f"{totals['profit_margin']:.1f}%")
-    ]
+    # 2 Financial snapshot
+    s = _slide(prs, "Your Numbers at a Glance", filename)
+    kpis = [("REVENUE", money(t["total_revenue"]))]
+    if t["cost_known"]:
+        kpis += [("COSTS", money(t["total_costs"])), ("NET PROFIT", money(t["net_profit"])),
+                 ("MARGIN", _fmt_pct(t["profit_margin"]))]
+    else:
+        kpis += [("COSTS", "Not provided"), ("NET PROFIT", "n/a"), ("MARGIN", "n/a")]
     for i, (lbl, val) in enumerate(kpis):
-        box = slide2.shapes.add_textbox(Inches(0.8 + i * 2.9), Inches(1.8), Inches(2.7), Inches(1.5))
-        tf = box.text_frame
-        tf.word_wrap = True
-        tf.paragraphs[0].text = lbl
-        tf.paragraphs[0].font.size = Pt(11)
-        tf.paragraphs[0].font.bold = True
-        tf.paragraphs[0].font.color.rgb = THEME_MUTED
-        p_val = tf.add_paragraph()
-        p_val.text = val
-        p_val.font.size = Pt(22)
-        p_val.font.bold = True
-        p_val.font.color.rgb = THEME_TEXT
+        _textbox(s, 0.8 + i * 3.0, 1.8, 2.8, 1.5, [(lbl, 11, THEME_MUTED, True), (val, 22, THEME_TEXT, True)])
+    _textbox(s, 0.8, 3.7, 11.7, 0.5, [("Key observations", 16, THEME_TEXT, True)])
+    _bullets(s, insights["highlights"], y=4.2, h=2.8, size=13, color=THEME_MUTED)
 
-    obs_box = slide2.shapes.add_textbox(Inches(0.8), Inches(3.8), Inches(11.7), Inches(3.0))
-    otext = obs_box.text_frame
-    otext.word_wrap = True
-    otext.paragraphs[0].text = "Key Observations"
-    otext.paragraphs[0].font.size = Pt(16)
-    otext.paragraphs[0].font.bold = True
-    otext.paragraphs[0].font.color.rgb = THEME_TEXT
-    
-    obs_points = [
-        f"Profit margin is {totals['profit_margin']:.1f}% on total revenue of {currency}{totals['total_revenue']:,.2f}.",
-        f"Data health index stands at {meta['data_health_index']}% across {meta['total_records']:,} analyzed records.",
-        f"{len(anomalies)} extreme transaction(s) detected. Review them before drawing final conclusions."
-    ]
-    for pt in obs_points:
-        p = otext.add_paragraph()
-        p.text = f"• {pt}"
-        p.font.size = Pt(13)
-        p.font.color.rgb = THEME_MUTED
+    # 3 Revenue by category
+    s = _slide(prs, "What Sells Best", filename)
+    top = facts["leaderboards"]["top_items"][:6]
+    if top and cat_col:
+        _chart(s, [i[cat_col] for i in top], [i[rev_col] for i in top], 0.8, 1.7, 7.8, 5.1)
+        _bullets(s, [
+            f"'{conc['top_category']}' leads with {conc['top1_share']:.1f}% of revenue.",
+            f"The top 3 categories account for {conc['top3_share']:.1f}%.",
+        ], x=8.9, y=2.0, w=3.8, h=4, size=14)
+    else:
+        _bullets(s, ["No category column was selected, so no category breakdown is available."])
 
-    # --- Slide 3: Revenue by Product / Category ---
-    slide3 = prs.slides.add_slide(blank_layout)
-    add_header(slide3, "Revenue by Category / Product", filename)
-    if top_items:
-        chart_data = CategoryChartData()
-        chart_data.categories = [str(item.get(meta['category_column'], 'Item')) for item in top_items[:6]]
-        chart_data.add_series("Revenue", [float(item.get(meta['revenue_column'], 0)) for item in top_items[:6]])
-        slide3.shapes.add_chart(XL_CHART_TYPE.COLUMN_CLUSTERED, Inches(0.8), Inches(1.8), Inches(7.5), Inches(5.0), chart_data)
+    # 4 Executive summary
+    s = _slide(prs, "Summary", filename)
+    _bullets(s, insights["highlights"] + [f"Top risk: {insights['risks'][0]}"])
 
-    # --- Slide 4: Executive Summary ---
-    slide4 = prs.slides.add_slide(blank_layout)
-    add_header(slide4, "Executive Summary", filename)
-    es_box = slide4.shapes.add_textbox(Inches(0.8), Inches(1.8), Inches(11.7), Inches(5.0))
-    es_tf = es_box.text_frame
-    es_tf.word_wrap = True
-    es_tf.paragraphs[0].text = f"The business generated {currency}{totals['total_revenue']:,.2f} in revenue with a net profit of {currency}{totals['net_profit']:,.2f} ({totals['profit_margin']:.1f}% margin)."
-    es_tf.paragraphs[0].font.size = Pt(16)
-    es_tf.paragraphs[0].font.color.rgb = THEME_TEXT
-    
-    # --- Slides 5 to 12: Structured Strategic Breakdowns ---
-    for title in ["Revenue and Profit", "Products and Categories", "Trends Over Time", "Risks to Watch", "Recommended Actions (30/60/90 days)", "Appendix: Data Quality and Notes"]:
-        s = prs.slides.add_slide(blank_layout)
-        add_header(s, title, filename)
-        tb = s.shapes.add_textbox(Inches(0.8), Inches(2.0), Inches(11.7), Inches(4.5))
-        tf = tb.text_frame
-        tf.word_wrap = True
-        tf.paragraphs[0].text = f"Analysis module for {title} based on verified dataset metrics."
-        tf.paragraphs[0].font.size = Pt(14)
-        tf.paragraphs[0].font.color.rgb = THEME_MUTED
+    # 5 Revenue and profit
+    s = _slide(prs, "Money In, Money Out", filename)
+    if t["cost_known"]:
+        _chart(s, ["Revenue", "Costs", "Net Profit"], [t["total_revenue"], t["total_costs"], t["net_profit"]],
+               0.8, 1.7, 7.8, 5.1, name="Amount")
+        cost_pct = t["total_costs"] / t["total_revenue"] * 100 if t["total_revenue"] > 0 else None
+        _bullets(s, [
+            f"Costs absorb {_fmt_pct(cost_pct)} of revenue.",
+            f"Net profit is {money(t['net_profit'])} ({_fmt_pct(t['profit_margin'])} margin).",
+        ], x=8.9, y=2.0, w=3.8, h=4, size=14)
+    else:
+        _bullets(s, [f"Total revenue is {money(t['total_revenue'])}.",
+                     "Cost data was not provided, so profit and margin cannot be shown."])
+
+    # 6 Top and bottom performers
+    s = _slide(prs, "Best and Weakest Sellers", filename)
+    items = facts["leaderboards"]
+    if items["top_items"] and cat_col:
+        _textbox(s, 0.8, 1.8, 5.6, 0.5, [("Top performers", 16, THEME_TEXT, True)])
+        _bullets(s, [f"{i[cat_col]}: {money(i[rev_col])}" for i in items["top_items"]], y=2.4, w=5.8, size=13)
+        if len(facts["revenue_by_category"]) > 5:
+            _textbox(s, 7.0, 1.8, 5.6, 0.5, [("Lowest performers", 16, THEME_TEXT, True)])
+            _bullets(s, [f"{i[cat_col]}: {money(i[rev_col])}" for i in items["bottom_items"]],
+                     x=7.0, y=2.4, w=5.6, size=13)
+    else:
+        _bullets(s, ["No category column was selected."])
+
+    # 7 Trends
+    s = _slide(prs, "How Sales Change Over Time", filename)
+    pts = trend["points"]
+    if len(pts) >= 2:
+        _chart(s, [p["period"] for p in pts], [p["revenue"] for p in pts], 0.8, 1.7, 7.8, 5.1, line=True)
+        lines = [f"Revenue is shown by {trend['granularity']} across {len(pts)} periods."]
+        if trend["change_pct"] is not None:
+            lines.append(f"Latest period moved {trend['change_pct']:+.1f}% versus the previous one.")
+        best = max(pts, key=lambda p: p["revenue"])
+        lines.append(f"Peak period: {best['period']} ({money(best['revenue'])}).")
+        _bullets(s, lines, x=8.9, y=2.0, w=3.8, h=4, size=14)
+    else:
+        _bullets(s, ["No usable date column was selected, so no trend is available."])
+
+    # 8 Scenario outlook
+    s = _slide(prs, "What-If Plans", filename)
+    if scenarios:
+        lines = []
+        for sc in scenarios[-6:]:
+            lines.append(f"{sc.get('scenario_name')}: revenue {money(sc['revenue'])}, "
+                         f"net profit {money(sc['net_profit'])}, margin {_fmt_pct(sc.get('margin'))}")
+        _bullets(s, lines, size=14)
+    else:
+        _bullets(s, ["No What-If scenarios have been saved yet.",
+                     "Model price, volume and cost changes in the simulator and save them to include them here."])
+
+    # 9 Risks
+    s = _slide(prs, "Things to Watch", filename)
+    _bullets(s, insights["risks"])
+
+    # 10 Actions
+    s = _slide(prs, "What To Do Next (30/60/90 days)", filename)
+    for i, days in enumerate(["30", "60", "90"]):
+        items = [(f"Next {days} days", 16, THEME_ACCENT, True)] + \
+                [(f"•  {a}", 13, THEME_TEXT, False) for a in insights["actions"][days]]
+        _textbox(s, 0.8 + i * 4.0, 1.9, 3.8, 4.8, items)
+
+    # 11 Data quality
+    s = _slide(prs, "Is Your Data Reliable?", filename)
+    lines = [f"Data health index: {meta['data_health_index']}%  |  Missing cells: {meta['missing_cells']:,}  |  "
+             f"Duplicate rows: {meta['duplicate_rows']:,}"]
+    if meta["anomaly_count"]:
+        vals = [a.get(rev_col) for a in facts["anomalies"][:5]]
+        lines.append(f"{meta['anomaly_count']} unusually large transaction(s) found. Largest values: "
+                     + ", ".join(money(v) for v in vals if v is not None))
+        lines.append("Review these before drawing final conclusions.")
+    else:
+        lines.append("No significant outliers detected.")
+    _bullets(s, lines)
+
+    # 12 Appendix
+    s = _slide(prs, "Notes: How This Was Worked Out", filename)
+    lines = [
+        f"Revenue column: {rev_col}. Cost column: {meta['cost_column'] or 'none'}. "
+        f"Category column: {cat_col or 'none'}. Date column: {meta['date_column'] or 'none'}.",
+        "All figures are computed directly from the uploaded data; no figures are estimated.",
+        "Outliers use the 1.5 x IQR rule on the revenue column.",
+    ] + facts["warnings"][:6]
+    _bullets(s, lines, size=12, color=THEME_MUTED)
 
     buf = io.BytesIO()
     prs.save(buf)
-    buf.seek(0)
     return buf.getvalue()
