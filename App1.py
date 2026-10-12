@@ -1,5 +1,5 @@
 """
-Executive Data Intelligence Suite - Streamlit Frontend (Phase 2 Integrated)
+Executive Data Intelligence Suite - Streamlit Frontend (Rich Graph Integrations)
 Powered by Centralized Fact Sheet (analysis.py) and Multi-Slide Deck Generator (deck_builder.py)
 """
 
@@ -50,8 +50,8 @@ if "app_state" not in st.session_state:
 if st.session_state["app_state"] == "welcome":
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
-        st.markdown("<br><br><h1 style='text-align: center;'>Executive Intelligence Suite <span class='beta-badge'>PILOT BETA V6.4</span></h1>", unsafe_allow_html=True)
-        st.markdown("<p style='text-align: center; color: #94a3b8; margin-bottom: 30px;'>Multi-Slide Boardroom Decks & AI Advisory</p>", unsafe_allow_html=True)
+        st.markdown("<br><br><h1 style='text-align: center;'>Executive Intelligence Suite <span class='beta-badge'>PILOT BETA V6.5</span></h1>", unsafe_allow_html=True)
+        st.markdown("<p style='text-align: center; color: #94a3b8; margin-bottom: 30px;'>Rich Graph Integrations & Multi-Slide Boardroom Decks</p>", unsafe_allow_html=True)
         st.markdown('<div class="saas-card">', unsafe_allow_html=True)
         if st.button("🚀 Launch Executive Workspace", type="primary"):
             st.session_state["app_state"] = "main"
@@ -90,7 +90,6 @@ if uploaded is not None:
                 df = pd.read_excel(io.BytesIO(file_bytes))
 
             st.session_state["active_df"] = df.copy()
-            # Reset deck state on new file upload
             st.session_state.pop("deck_bytes", None)
         except Exception as e:
             st.error(f"Error parsing file: {e}")
@@ -104,13 +103,15 @@ if uploaded is not None:
     
     num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
     cat_cols = df.select_dtypes(include=['object', 'category', 'bool']).columns.tolist()
+    date_cols = [c for c in df.columns if any(k in c.lower() for k in ['date', 'time', 'year', 'month', 'period'])]
     
     valid_nums = [c for c in num_cols if not any(k in c.lower() for k in ['id', 'code', 'year'])]
     sel_rev = st.sidebar.selectbox("Revenue Column", valid_nums if valid_nums else num_cols)
     sel_cost = st.sidebar.selectbox("Cost Column", ["None"] + (valid_nums if valid_nums else num_cols))
     sel_cat = st.sidebar.selectbox("Category / Group Column", ["None"] + cat_cols)
+    sel_date = st.sidebar.selectbox("Date / Time Column (Optional)", ["None"] + date_cols)
 
-    # GENERATE CENTRALIZED FACT SHEET (Phase 1)
+    # GENERATE CENTRALIZED FACT SHEET
     facts = analyze_dataset(df, revenue_col=sel_rev, cost_col=sel_cost, category_col=sel_cat)
 
     st.sidebar.markdown("---")
@@ -136,11 +137,49 @@ if uploaded is not None:
         c3.metric("Net Profit", f"{currency}{profit:,.2f}")
         c4.metric("Profit Margin", f"{margin:.1f}%")
         
+        st.markdown("---")
+        
+        # RICH GRAPH INTEGRATIONS: Overview Charts
+        gcol1, gcol2 = st.columns(2)
+        with gcol1:
+            fig_overview = px.bar(
+                x=["Revenue", "Costs", "Net Profit"],
+                y=[tot_rev, tot_cost, profit],
+                title="Financial Overview Breakdown",
+                labels={"x": "Metric", "y": f"Amount ({currency})"},
+                color=["Revenue", "Costs", "Net Profit"],
+                template="plotly_dark"
+            )
+            st.plotly_chart(fig_overview, use_container_width=True)
+            
+        with gcol2:
+            if sel_cat != "None" and facts["revenue_by_category"]:
+                pie_df = pd.DataFrame(list(facts["revenue_by_category"].items()), columns=[sel_cat, sel_rev])
+                fig_pie = px.pie(
+                    pie_df.head(6), 
+                    names=sel_cat, 
+                    values=sel_rev, 
+                    title=f"Top {sel_cat} Revenue Share",
+                    template="plotly_dark",
+                    hole=0.4
+                )
+                st.plotly_chart(fig_pie, use_container_width=True)
+            else:
+                fig_hist = px.histogram(df, x=sel_rev, title=f"Distribution of {sel_rev}", template="plotly_dark")
+                st.plotly_chart(fig_hist, use_container_width=True)
+
         st.markdown("### Dataset Preview")
         st.dataframe(df.head(10), use_container_width=True)
 
     with tabs[1]: # Trends & Leaderboard
         st.subheader("Performance Trends & Leaderboards")
+        
+        if sel_date != "None" and sel_date in df.columns and sel_rev in df.columns:
+            st.markdown("#### Time-Series Trend Analysis")
+            trend_df = df.groupby(sel_date)[sel_rev].sum().reset_index()
+            fig_trend = px.line(trend_df, x=sel_date, y=sel_rev, title=f"{sel_rev} Trend Over Time", markers=True, template="plotly_dark")
+            st.plotly_chart(fig_trend, use_container_width=True)
+
         if sel_cat != "None" and facts["revenue_by_category"]:
             grouped_df = pd.DataFrame(list(facts["revenue_by_category"].items()), columns=[sel_cat, sel_rev])
             col_t1, col_t2 = st.columns(2)
@@ -148,10 +187,10 @@ if uploaded is not None:
                 st.markdown("#### Top Categories by Revenue")
                 st.dataframe(grouped_df.head(10), use_container_width=True)
             with col_t2:
-                fig = px.bar(grouped_df.head(10), x=sel_cat, y=sel_rev, title=f"Top {sel_cat} by {sel_rev}", template="plotly_dark")
-                st.plotly_chart(fig, use_container_width=True)
+                fig_bar = px.bar(grouped_df.head(10), x=sel_cat, y=sel_rev, title=f"Top 10 {sel_cat} by {sel_rev}", template="plotly_dark")
+                st.plotly_chart(fig_bar, use_container_width=True)
         else:
-            st.info("Please select a valid Category Column in the sidebar to view leaderboards.")
+            st.info("Select a valid Category Column in the sidebar to view leaderboards and category bar charts.")
 
     with tabs[2]: # Data Health & Anomalies
         st.subheader("Data Quality Audit & Anomaly Detection")
@@ -160,11 +199,18 @@ if uploaded is not None:
         dh2.metric("Missing Cells", f"{facts['metadata']['missing_cells']:,}")
         dh3.metric("Duplicate Rows", f"{facts['metadata']['duplicate_rows']:,}")
 
-        st.markdown("#### Potential Revenue Outliers / Anomalies")
-        if facts["anomalies"]:
-            st.dataframe(pd.DataFrame(facts["anomalies"]), use_container_width=True)
-        else:
-            st.success("No significant outliers detected in revenue distribution.")
+        st.markdown("#### Revenue Outliers & Correlation Analysis")
+        acols1, acols2 = st.columns(2)
+        with acols1:
+            if facts["anomalies"]:
+                st.markdown("##### Detected Outliers")
+                st.dataframe(pd.DataFrame(facts["anomalies"]).head(5), use_container_width=True)
+            else:
+                st.success("No significant outliers detected.")
+        with acols2:
+            if sel_cost != "None" and sel_cost in df.columns:
+                fig_scatter = px.scatter(df, x=sel_cost, y=sel_rev, title="Cost vs. Revenue Correlation", template="plotly_dark")
+                st.plotly_chart(fig_scatter, use_container_width=True)
 
     with tabs[3]: # What-If Simulator
         st.subheader("Dynamic What-If Financial Scenario Modeling")
@@ -213,12 +259,12 @@ if uploaded is not None:
                 except Exception as e:
                     st.error(f"Connection error: {e}")
 
-    with tabs[5]: # Boardroom Deck (Phase 2 Multi-Slide Generator)
+    with tabs[5]: # Boardroom Deck
         st.subheader("Automated Multi-Slide Boardroom Presentation Generator")
-        st.caption("Compile your verified financial metrics directly into a professional multi-slide executive PowerPoint presentation with native charts.")
+        st.caption("Compile your verified financial metrics and category charts into a multi-slide executive presentation.")
         
         if st.button("Generate Boardroom Deck (.pptx)", type="primary"):
-            with st.spinner("📊 Building professional multi-slide presentation..."):
+            with st.spinner("📊 Building multi-slide presentation with category charts..."):
                 try:
                     deck_bytes = create_executive_deck(facts, currency=currency)
                     st.session_state["deck_bytes"] = deck_bytes
@@ -226,7 +272,6 @@ if uploaded is not None:
                 except Exception as e:
                     st.error(f"Error generating presentation: {e}")
 
-        # Render download button outside the generation button block so it persists across reruns
         if "deck_bytes" in st.session_state:
             st.download_button(
                 label="📥 Download Executive Boardroom Deck (.pptx)",
@@ -238,7 +283,7 @@ if uploaded is not None:
 
     with tabs[6]: # Feedback
         st.subheader("Pilot Beta Feedback & Support")
-        st.markdown("We value your input as an initial tester for App1 v6.4!")
+        st.markdown("We value your input as an initial tester for App1 v6.5!")
         st.markdown("👉 **[Submit Feedback via Google Forms](https://forms.gle/your-feedback-link)**")
 else:
     st.info("👋 Welcome to App1! Please upload your dataset above to initialize the executive suite.")

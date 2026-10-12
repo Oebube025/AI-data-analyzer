@@ -1,6 +1,6 @@
 """
 Professional Boardroom Deck Generator (deck_builder.py)
-Phase 2: Multi-slide PowerPoint generation with native charts and text fitting.
+Multi-slide PowerPoint generation with native charts and category breakdowns.
 Contains ZERO Streamlit imports.
 """
 
@@ -11,25 +11,11 @@ from pptx.chart.data import CategoryChartData
 from pptx.dml.color import RGBColor
 import io
 
-# Theme Configuration
-THEME_BG = RGBColor(15, 23, 42)      # Dark Slate (#0f172a)
-THEME_CARD = RGBColor(30, 41, 59)    # Lighter Slate (#1e293b)
-THEME_TEXT = RGBColor(248, 250, 252) # Off White (#f8fafc)
-THEME_MUTED = RGBColor(148, 163, 184)# Gray (#94a3b8)
-THEME_ACCENT = RGBColor(37, 99, 235) # Blue (#2563eb)
-
-def fit_text(tf, text, box_w_in, box_h_in, start=20, minimum=12):
-    """Heuristic text-fitting helper to prevent text overflow."""
-    for size in range(start, minimum - 1, -1):
-        chars_per_line = int(box_w_in * 72 / (size * 0.5))
-        lines = sum(max(1, -(-len(p) // chars_per_line)) for p in text.splitlines())
-        if lines * size * 1.3 / 72 <= box_h_in:
-            break
-    tf.word_wrap = True
-    tf.text = text
-    for p in tf.paragraphs:
-        for r in p.runs:
-            r.font.size = Pt(size)
+THEME_BG = RGBColor(15, 23, 42)
+THEME_CARD = RGBColor(30, 41, 59)
+THEME_TEXT = RGBColor(248, 250, 252)
+THEME_MUTED = RGBColor(148, 163, 184)
+THEME_ACCENT = RGBColor(37, 99, 235)
 
 def create_executive_deck(facts: dict, currency: str = "₦") -> bytes:
     prs = Presentation()
@@ -93,7 +79,7 @@ def create_executive_deck(facts: dict, currency: str = "₦") -> bytes:
         p_val.font.bold = True
         p_val.font.color.rgb = THEME_TEXT
 
-    # --- Slide 3: Chart Slide ---
+    # --- Slide 3: Financial Overview Chart ---
     slide3 = prs.slides.add_slide(blank_layout)
     tb3 = slide3.shapes.add_textbox(Inches(1), Inches(0.6), Inches(11.333), Inches(0.8))
     tf3 = tb3.text_frame
@@ -108,17 +94,35 @@ def create_executive_deck(facts: dict, currency: str = "₦") -> bytes:
     chart_data.add_series("Financials", (totals["total_revenue"], totals["total_costs"], totals["net_profit"]))
     slide3.shapes.add_chart(XL_CHART_TYPE.COLUMN_CLUSTERED, Inches(1), Inches(1.8), Inches(11.333), Inches(5), chart_data)
 
-    # --- Slide 4: Data Quality & Warnings Appendix ---
-    slide4 = prs.slides.add_slide(blank_layout)
-    tb4 = slide4.shapes.add_textbox(Inches(1), Inches(0.8), Inches(11.333), Inches(1))
-    tf4 = tb4.text_frame
-    tp4 = tf4.paragraphs[0]
-    tp4.text = "Data Quality Audit & Notes"
-    tp4.font.size = Pt(26)
-    tp4.font.bold = True
-    tp4.font.color.rgb = THEME_TEXT
+    # --- Slide 4: Category Breakdown Chart (If available) ---
+    rev_cat = facts.get("revenue_by_category", {})
+    if rev_cat:
+        slide4 = prs.slides.add_slide(blank_layout)
+        tb4 = slide4.shapes.add_textbox(Inches(1), Inches(0.6), Inches(11.333), Inches(0.8))
+        tf4 = tb4.text_frame
+        tp4 = tf4.paragraphs[0]
+        tp4.text = f"Top {meta.get('category_column', 'Category')} Breakdown by Revenue"
+        tp4.font.size = Pt(26)
+        tp4.font.bold = True
+        tp4.font.color.rgb = THEME_TEXT
 
-    notes_box = slide4.shapes.add_textbox(Inches(1), Inches(2.0), Inches(11.333), Inches(4.5))
+        cat_chart_data = CategoryChartData()
+        top_cats = list(rev_cat.items())[:8] # Take top 8
+        cat_chart_data.categories = [str(k) for k, v in top_cats]
+        cat_chart_data.add_series("Revenue", [float(v) for k, v in top_cats])
+        slide4.shapes.add_chart(XL_CHART_TYPE.BAR_CLUSTERED, Inches(1), Inches(1.8), Inches(11.333), Inches(5), cat_chart_data)
+
+    # --- Slide 5: Data Quality & Warnings Appendix ---
+    slide5 = prs.slides.add_slide(blank_layout)
+    tb5 = slide5.shapes.add_textbox(Inches(1), Inches(0.8), Inches(11.333), Inches(1))
+    tf5 = tb5.text_frame
+    tp5 = tf5.paragraphs[0]
+    tp5.text = "Data Quality Audit & Notes"
+    tp5.font.size = Pt(26)
+    tp5.font.bold = True
+    tp5.font.color.rgb = THEME_TEXT
+
+    notes_box = slide5.shapes.add_textbox(Inches(1), Inches(2.0), Inches(11.333), Inches(4.5))
     ntf = notes_box.text_frame
     ntf.word_wrap = True
     
@@ -129,9 +133,8 @@ def create_executive_deck(facts: dict, currency: str = "₦") -> bytes:
     else:
         audit_text += "\nNo structural warnings detected in the dataset."
     
-    fit_text(ntf, audit_text, 11.333, 4.5, start=16, minimum=12)
+    ntf.text = audit_text
 
-    # Save to buffer
     buf = io.BytesIO()
     prs.save(buf)
     buf.seek(0)
