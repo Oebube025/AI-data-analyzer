@@ -15,7 +15,7 @@ import cohere
 
 app = FastAPI(
     title="Executive Data Intelligence Suite - Advanced Backend",
-    version="6.0.0"
+    version="6.1.0"
 )
 
 ALLOWED_ORIGINS = [
@@ -68,6 +68,19 @@ async def analyze_dataset(file: UploadFile = File(...), x_api_key: str = Header(
         filename = file.filename
         df = pd.read_csv(io.BytesIO(contents), encoding="utf-8") if filename.lower().endswith(".csv") else pd.read_excel(io.BytesIO(contents))
         
+        # Clean currency symbols and commas so DuckDB can aggregate properly
+        for col in df.columns:
+            if df[col].dtype == object:
+                sample = df[col].dropna().head(20).astype(str)
+                if sample.str.contains(r'[₦$€£,\(\)]', regex=True).any():
+                    cleaned_col = sample.str.replace(r'[₦$€£,]', '', regex=True).str.replace(r'\((.*?)\)', r'-\1', regex=True)
+                    try:
+                        pd.to_numeric(cleaned_col, errors='raise')
+                        df[col] = df[col].astype(str).str.replace(r'[₦$€£,]', '', regex=True).str.replace(r'\((.*?)\)', r'-\1', regex=True)
+                        df[col] = pd.to_numeric(df[col], errors='coerce')
+                    except Exception:
+                        pass
+
         # Register dataset in DuckDB in-memory engine
         duck_conn.register("dataset", df)
 
@@ -111,20 +124,19 @@ def run_simulation(req: SimulationRequest, x_api_key: str = Header(None)):
     try:
         query = f"""
             SELECT 
-                SUM("{req.revenue_col}") * {req.price_factor} * {req.volume_factor} AS simulated_revenue,
-                SUM("{req.cost_col}") * {req.volume_factor} AS simulated_cost
+                SUM(CAST("{req.revenue_col}" AS DOUBLE)) * {req.price_factor} * {req.volume_factor} AS simulated_revenue,
+                SUM(CAST("{req.cost_col}" AS DOUBLE)) * {req.volume_factor} AS simulated_cost
             FROM dataset
         """ if req.cost_col != "None" else f"""
             SELECT 
-                SUM("{req.revenue_col}") * {req.price_factor} * {req.volume_factor} AS simulated_revenue,
+                SUM(CAST("{req.revenue_col}" AS DOUBLE)) * {req.price_factor} * {req.volume_factor} AS simulated_revenue,
                 0.0 AS simulated_cost
             FROM dataset
         """
         res_df = duck_conn.execute(query).fetchdf()
-        # Normalize column names to lowercase to prevent KeyErrors
         res_df.columns = [c.lower() for c in res_df.columns]
-        rev = float(res_df['simulated_revenue'].iloc[0])
-        cost = float(res_df['simulated_cost'].iloc[0])
+        rev = float(res_df['simulated_revenue'].iloc[0]) if not pd.isna(res_df['simulated_revenue'].iloc[0]) else 0.0
+        cost = float(res_df['simulated_cost'].iloc[0]) if not pd.isna(res_df['simulated_cost'].iloc[0]) else 0.0
         return {"simulated_revenue": rev, "simulated_cost": cost, "simulated_profit": rev - cost}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
