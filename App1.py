@@ -251,13 +251,20 @@ if uploaded is not None:
                         headers={"X-API-Key": BACKEND_SECRET_KEY},
                         timeout=120
                     )
+                    
+                    # Safely handle JSON parsing
+                    try:
+                        res_json = res.json()
+                    except Exception:
+                        res_json = {"detail": res.text or f"Server error (Status Code: {res.status_code})"}
+
                     if res.status_code == 200:
                         st.markdown("### 📋 Comprehensive Boardroom Advisory Report")
                         st.markdown('<div class="saas-card">', unsafe_allow_html=True)
-                        st.markdown(res.json().get("advisory", ""))
+                        st.markdown(res_json.get("advisory", ""))
                         st.markdown('</div>', unsafe_allow_html=True)
                     else:
-                        st.error(res.json().get('detail', 'AI advisory request failed.'))
+                        st.error(res_json.get('detail', 'AI advisory request failed.'))
                 except Exception as e:
                     st.error(f"Connection error: {e}")
 

@@ -1,46 +1,48 @@
 """
 FastAPI Backend (backend/app/main.py)
-Updated with the active Cohere model ID (command-r-plus-08-2024) and 6-section structured advisory.
+Robust AI Advisory Endpoint with Safe JSON Error Handling.
 """
 
 from fastapi import FastAPI, Header, HTTPException
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import Any
 import os
 import cohere
 import logging
 
-app = FastAPI(title="Executive Intelligence Backend", version="6.11")
+app = FastAPI(title="Executive Intelligence Backend", version="6.12")
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("uvicorn")
 
 class AIAdvisoryRequest(BaseModel):
-    verified_stats: Any  # Accepts both dict and string payloads seamlessly
+    verified_stats: Any
 
 @app.get("/health")
 async def health_check(x_api_key: str = Header(None)):
     expected_token = os.getenv("BACKEND_SECRET_KEY")
     if expected_token and x_api_key != expected_token:
-        raise HTTPException(status_code=401, detail="Unauthorized")
+        return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
     return {"status": "healthy", "service": "Executive Intelligence Backend"}
 
 @app.post("/api/ai-advisory")
 async def generate_ai_advisory(payload: AIAdvisoryRequest, x_api_key: str = Header(None)):
     expected_token = os.getenv("BACKEND_SECRET_KEY")
     if expected_token and x_api_key != expected_token:
-        raise HTTPException(status_code=401, detail="Unauthorized")
+        return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
 
     api_key = os.getenv("COHERE_API_KEY")
     if not api_key:
-        raise HTTPException(status_code=500, detail="COHERE_API_KEY configuration missing in environment variables.")
+        return JSONResponse(
+            status_code=500, 
+            content={"detail": "COHERE_API_KEY configuration missing in environment variables."}
+        )
     
     try:
         co = cohere.Client(api_key)
-        
         stats_content = payload.verified_stats if isinstance(payload.verified_stats, str) else str(payload.verified_stats)
 
-        # 6-Section Structured Prompt with Strict Grounding
         prompt = f"""
         You are an elite Chief Financial Officer and Board Advisor. 
         Analyze the following verified dataset statistics strictly. DO NOT invent, assume, or extrapolate numbers not present in this dataset fact sheet. Every financial figure quoted must match the verified statistics verbatim.
@@ -58,11 +60,11 @@ async def generate_ai_advisory(payload: AIAdvisoryRequest, x_api_key: str = Head
         """
 
         response = co.chat(
-            model="command-r-plus-08-2024",  # Valid, active Cohere production model ID
+            model="command-r-plus-08-2024",
             message=prompt,
-            temperature=0.2  # Low temperature to prevent hallucinations
+            temperature=0.2
         )
         return {"advisory": response.text}
     except Exception as e:
         logger.error(f"Cohere AI error: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Cohere AI Error: {str(e)}")
+        return JSONResponse(status_code=500, content={"detail": f"Cohere AI Error: {str(e)}"})
