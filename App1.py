@@ -268,19 +268,24 @@ if uploaded is not None:
 
     with tabs[4]: # AI Advisory (6-Section Strategic Report)
         st.subheader("Executive AI Business Advisor")
-        st.caption("Generate grounded, extensive 6-section AI advisory reports with strict number verification.")
+        st.caption("Generate grounded, extensive 6-section AI advisory reports incorporating your baseline data and saved What-If scenarios.")
         
         if st.button("Generate Extensive 6-Section AI Advisory Report", type="primary"):
-            with st.spinner("🤖 Analyzing verified fact sheet via Cohere AI (Extensive 6-Section Grounding)..."):
+            with st.spinner("🤖 Analyzing verified fact sheet & custom scenarios via Cohere AI..."):
                 try:
+                    # Combine baseline facts and saved user scenarios into the payload
+                    advisory_payload = {
+                        "verified_stats": facts,
+                        "saved_scenarios": st.session_state.get("saved_scenarios", [])
+                    }
+                    
                     res = requests.post(
                         f"{BACKEND_URL}/api/ai-advisory",
-                        json={"verified_stats": facts},
+                        json=advisory_payload,
                         headers={"X-API-Key": BACKEND_SECRET_KEY},
                         timeout=120
                     )
                     
-                    # Safely handle JSON parsing
                     try:
                         res_json = res.json()
                     except Exception:
