@@ -333,7 +333,7 @@ if uploaded is not None:
             st.rerun()
 
         st.markdown("---")
-        col_w1, col_w2 = st.
+        col_w1, col_w2 = st.columns(2)
         with col_w1:
             scenario_name = st.text_input("Scenario Label", value="Growth Plan 1")
             price_adj = st.slider("Price Adjustment (%)", -50, 50, value=int(st.session_state["sim_price"]))
