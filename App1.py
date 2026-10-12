@@ -1,6 +1,7 @@
 """
-Executive Data Intelligence Suite - Streamlit Frontend (Phase 2 & Rich Graph Integrated)
-Powered by Centralized Fact Sheet (analysis.py) and Multi-Slide Deck Generator (deck_builder.py)
+Executive Data Intelligence Suite - Streamlit Frontend (Phase 3 6-Section AI Integrated)
+Powered by Centralized Fact Sheet (analysis.py), 12-Slide Deck Generator (deck_builder.py),
+Rich Plotly Graph Integrations, and 6-Section Structured AI Reporting.
 """
 
 import streamlit as st
@@ -50,8 +51,8 @@ if "app_state" not in st.session_state:
 if st.session_state["app_state"] == "welcome":
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
-        st.markdown("<br><br><h1 style='text-align: center;'>Executive Intelligence Suite <span class='beta-badge'>PILOT BETA V6.6</span></h1>", unsafe_allow_html=True)
-        st.markdown("<p style='text-align: center; color: #94a3b8; margin-bottom: 30px;'>Rich Graph Integrations & 12-Slide Boardroom Decks</p>", unsafe_allow_html=True)
+        st.markdown("<br><br><h1 style='text-align: center;'>Executive Intelligence Suite <span class='beta-badge'>PILOT BETA V6.8</span></h1>", unsafe_allow_html=True)
+        st.markdown("<p style='text-align: center; color: #94a3b8; margin-bottom: 30px;'>6-Section AI Reporting • 12-Slide Decks • Rich Visual Analytics</p>", unsafe_allow_html=True)
         st.markdown('<div class="saas-card">', unsafe_allow_html=True)
         if st.button("🚀 Launch Executive Workspace", type="primary"):
             st.session_state["app_state"] = "main"
@@ -237,28 +238,30 @@ if uploaded is not None:
             sc2.metric("Simulated Costs", f"{currency}{sim_cost:,.2f}")
             sc3.metric("Simulated Net Profit", f"{currency}{sim_profit:,.2f}", f"{sim_profit - profit:+,.2f}")
 
-    with tabs[4]: # AI Advisory
+    with tabs[4]: # AI Advisory (6-Section Strategic Report)
         st.subheader("Executive AI Business Advisor")
-        st.caption("Generate professional AI insights based on your verified dataset statistics.")
-        if st.button("Generate AI Advisory Report", type="primary"):
-            stats_summary = f"Dataset: {uploaded.name}, Records: {facts['metadata']['total_records']:,}, Total Revenue: {facts['totals']['total_revenue']:,.2f}, Total Costs: {facts['totals']['total_costs']:,.2f}, Net Profit: {facts['totals']['net_profit']:,.2f}, Margin: {facts['totals']['profit_margin']:.1f}%"
-            with st.spinner("🤖 Generating executive advisory report via Cohere AI..."):
+        st.caption("Generate grounded, extensive 6-section AI advisory reports with strict number verification.")
+        
+        if st.button("Generate Extensive 6-Section AI Advisory Report", type="primary"):
+            with st.spinner("🤖 Analyzing verified fact sheet via Cohere AI (Extensive 6-Section Grounding)..."):
                 try:
                     res = requests.post(
                         f"{BACKEND_URL}/api/ai-advisory",
-                        json={"verified_stats": stats_summary},
+                        json={"verified_stats": facts},
                         headers={"X-API-Key": BACKEND_SECRET_KEY},
                         timeout=120
                     )
                     if res.status_code == 200:
-                        st.markdown("### 📊 Executive AI Insights")
+                        st.markdown("### 📋 Comprehensive Boardroom Advisory Report")
+                        st.markdown('<div class="saas-card">', unsafe_allow_html=True)
                         st.markdown(res.json().get("advisory", ""))
+                        st.markdown('</div>', unsafe_allow_html=True)
                     else:
                         st.error(res.json().get('detail', 'AI advisory request failed.'))
                 except Exception as e:
                     st.error(f"Connection error: {e}")
 
-    with tabs[5]: # Boardroom Deck (12-Slide Strategic Generator)
+    with tabs[5]: # Boardroom Deck
         st.subheader("Automated 12-Slide Strategic Boardroom Presentation")
         st.caption("Compile your verified financial metrics, category breakdowns, and audit notes into a professional multi-slide executive presentation.")
         
@@ -282,7 +285,7 @@ if uploaded is not None:
 
     with tabs[6]: # Feedback
         st.subheader("Pilot Beta Feedback & Support")
-        st.markdown("We value your input as an initial tester for App1 v6.6!")
+        st.markdown("We value your input as an initial tester for App1 v6.8!")
         st.markdown("👉 **[Submit Feedback via Google Forms](https://forms.gle/your-feedback-link)**")
 else:
     st.info("👋 Welcome to App1! Please upload your dataset above to initialize the executive suite.")
