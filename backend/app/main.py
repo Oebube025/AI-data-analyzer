@@ -1,6 +1,6 @@
 """
 FastAPI Backend (backend/app/main.py)
-Updated with current Cohere model name and flexible payload handling.
+Updated with the active Cohere model ID (command-r-plus-08-2024) and 6-section structured advisory.
 """
 
 from fastapi import FastAPI, Header, HTTPException
@@ -10,13 +10,13 @@ import os
 import cohere
 import logging
 
-app = FastAPI(title="Executive Intelligence Backend", version="6.10")
+app = FastAPI(title="Executive Intelligence Backend", version="6.11")
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("uvicorn")
 
 class AIAdvisoryRequest(BaseModel):
-    verified_stats: Any  # Accepts both dict and string payloads
+    verified_stats: Any  # Accepts both dict and string payloads seamlessly
 
 @app.get("/health")
 async def health_check(x_api_key: str = Header(None)):
@@ -58,7 +58,7 @@ async def generate_ai_advisory(payload: AIAdvisoryRequest, x_api_key: str = Head
         """
 
         response = co.chat(
-            model="command-r-plus-08-2024",  # Updated to current supported Cohere model version
+            model="command-r-plus-08-2024",  # Valid, active Cohere production model ID
             message=prompt,
             temperature=0.2  # Low temperature to prevent hallucinations
         )
