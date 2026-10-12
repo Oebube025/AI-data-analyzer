@@ -1,0 +1,8 @@
+fastapi
+uvicorn
+pandas
+numpy
+cohere
+duckdb
+python-pptx
+openpyxl
