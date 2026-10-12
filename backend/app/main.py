@@ -1,27 +1,28 @@
 """
-FastAPI Backend Core - Executive Data Intelligence Suite (Roadmap V6)
-Powered by DuckDB, Cohere AI, and FastAPI
+FastAPI Backend Core - Executive Data Intelligence Suite (Phase 0 Patched)
+Powered by FastAPI, Pandas, and Cohere AI
 """
 
 from fastapi import FastAPI, UploadFile, File, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 import pandas as pd
-import duckdb
 import io
 import numpy as np
 import os
+import logging
 import cohere
 
+logger = logging.getLogger("uvicorn.error")
+
 app = FastAPI(
-    title="Executive Data Intelligence Suite - Advanced Backend",
-    version="6.1.0"
+    title="Executive Data Intelligence Suite - Secure Backend",
+    version="6.2.0"
 )
 
 ALLOWED_ORIGINS = [
     "http://localhost:8501",
     "http://127.0.0.1:8501",
-    "https://your-streamlit-app-domain.streamlit.app"
 ]
 
 app.add_middleware(
@@ -33,26 +34,16 @@ app.add_middleware(
 )
 
 MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024  # 10 MB strict upload cap
-duck_conn = duckdb.connect(database=":memory:")
 
 class AIAdvisoryRequest(BaseModel):
     verified_stats: str = Field(..., max_length=5000)
-
-class QueryRequest(BaseModel):
-    sql_query: str = Field(..., max_length=1000)
-
-class SimulationRequest(BaseModel):
-    price_factor: float
-    volume_factor: float
-    revenue_col: str
-    cost_col: str
 
 @app.get("/health")
 def health_check(x_api_key: str = Header(None)):
     expected_token = os.getenv("BACKEND_SECRET_KEY")
     if not expected_token or x_api_key != expected_token:
         raise HTTPException(status_code=401, detail="Unauthorized")
-    return {"status": "online", "service": "Advanced BI FastAPI Backend"}
+    return {"status": "online", "service": "Secure BI FastAPI Backend"}
 
 @app.post("/api/analyze")
 async def analyze_dataset(file: UploadFile = File(...), x_api_key: str = Header(None)):
@@ -66,23 +57,12 @@ async def analyze_dataset(file: UploadFile = File(...), x_api_key: str = Header(
             raise HTTPException(status_code=413, detail="File too large (Max 10MB).")
 
         filename = file.filename
-        df = pd.read_csv(io.BytesIO(contents), encoding="utf-8") if filename.lower().endswith(".csv") else pd.read_excel(io.BytesIO(contents))
-        
-        # Clean currency symbols and commas so DuckDB can aggregate properly
-        for col in df.columns:
-            if df[col].dtype == object:
-                sample = df[col].dropna().head(20).astype(str)
-                if sample.str.contains(r'[₦$€£,\(\)]', regex=True).any():
-                    cleaned_col = sample.str.replace(r'[₦$€£,]', '', regex=True).str.replace(r'\((.*?)\)', r'-\1', regex=True)
-                    try:
-                        pd.to_numeric(cleaned_col, errors='raise')
-                        df[col] = df[col].astype(str).str.replace(r'[₦$€£,]', '', regex=True).str.replace(r'\((.*?)\)', r'-\1', regex=True)
-                        df[col] = pd.to_numeric(df[col], errors='coerce')
-                    except Exception:
-                        pass
-
-        # Register dataset in DuckDB in-memory engine
-        duck_conn.register("dataset", df)
+        try:
+            df = pd.read_csv(io.BytesIO(contents), encoding="utf-8")
+        except UnicodeDecodeError:
+            df = pd.read_csv(io.BytesIO(contents), encoding="latin-1")
+        except Exception:
+            df = pd.read_excel(io.BytesIO(contents))
 
         total_records = len(df)
         fields_count = len(df.columns)
@@ -102,44 +82,11 @@ async def analyze_dataset(file: UploadFile = File(...), x_api_key: str = Header(
             "categorical_columns": cat_cols,
             "status": "success"
         }
+    except HTTPException as he:
+        raise he
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/api/query")
-def execute_sql_query(req: QueryRequest, x_api_key: str = Header(None)):
-    expected_token = os.getenv("BACKEND_SECRET_KEY")
-    if not expected_token or x_api_key != expected_token:
-        raise HTTPException(status_code=401, detail="Unauthorized")
-    try:
-        result_df = duck_conn.execute(req.sql_query).fetchdf()
-        return result_df.to_dict(orient="records")
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-@app.post("/api/simulate")
-def run_simulation(req: SimulationRequest, x_api_key: str = Header(None)):
-    expected_token = os.getenv("BACKEND_SECRET_KEY")
-    if not expected_token or x_api_key != expected_token:
-        raise HTTPException(status_code=401, detail="Unauthorized")
-    try:
-        query = f"""
-            SELECT 
-                SUM(CAST("{req.revenue_col}" AS DOUBLE)) * {req.price_factor} * {req.volume_factor} AS simulated_revenue,
-                SUM(CAST("{req.cost_col}" AS DOUBLE)) * {req.volume_factor} AS simulated_cost
-            FROM dataset
-        """ if req.cost_col != "None" else f"""
-            SELECT 
-                SUM(CAST("{req.revenue_col}" AS DOUBLE)) * {req.price_factor} * {req.volume_factor} AS simulated_revenue,
-                0.0 AS simulated_cost
-            FROM dataset
-        """
-        res_df = duck_conn.execute(query).fetchdf()
-        res_df.columns = [c.lower() for c in res_df.columns]
-        rev = float(res_df['simulated_revenue'].iloc[0]) if not pd.isna(res_df['simulated_revenue'].iloc[0]) else 0.0
-        cost = float(res_df['simulated_cost'].iloc[0]) if not pd.isna(res_df['simulated_cost'].iloc[0]) else 0.0
-        return {"simulated_revenue": rev, "simulated_cost": cost, "simulated_profit": rev - cost}
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        logger.error(f"Internal analyze error: {str(e)}")
+        raise HTTPException(status_code=500, detail="An internal processing error occurred.")
 
 @app.post("/api/ai-advisory")
 async def generate_ai_advisory(payload: AIAdvisoryRequest, x_api_key: str = Header(None)):
@@ -149,15 +96,16 @@ async def generate_ai_advisory(payload: AIAdvisoryRequest, x_api_key: str = Head
 
     api_key = os.getenv("COHERE_API_KEY")
     if not api_key:
-        raise HTTPException(status_code=500, detail="COHERE_API_KEY missing.")
+        raise HTTPException(status_code=500, detail="COHERE_API_KEY configuration missing.")
     
     try:
         co = cohere.Client(api_key)
         response = co.chat(
             model="command-a-03-2025",
-            message=f"You are an expert Chief Business Financial Adviser. Based ONLY on the verified dataset statistics below, provide a professional analysis in 3 sections:\n\n{payload.verified_stats}",
+            message=f"You are an expert Chief Business Financial Adviser. Based ONLY on the verified dataset statistics below, provide a professional executive analysis in 3 clear sections:\n\n{payload.verified_stats}",
             temperature=0.3
         )
         return {"advisory": response.text}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Cohere AI error: {str(e)}")
+        raise HTTPException(status_code=500, detail="AI advisory generation failed.")
