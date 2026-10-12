@@ -1,6 +1,6 @@
 """
 FastAPI Backend (backend/app/main.py)
-Fixed AI Advisory Request model to accept dict or string payloads.
+Updated with current Cohere model name and flexible payload handling.
 """
 
 from fastapi import FastAPI, Header, HTTPException
@@ -10,13 +10,13 @@ import os
 import cohere
 import logging
 
-app = FastAPI(title="Executive Intelligence Backend", version="6.9")
+app = FastAPI(title="Executive Intelligence Backend", version="6.10")
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("uvicorn")
 
 class AIAdvisoryRequest(BaseModel):
-    verified_stats: Any  # Accepts both dict and string payloads seamlessly
+    verified_stats: Any  # Accepts both dict and string payloads
 
 @app.get("/health")
 async def health_check(x_api_key: str = Header(None)):
@@ -38,7 +38,6 @@ async def generate_ai_advisory(payload: AIAdvisoryRequest, x_api_key: str = Head
     try:
         co = cohere.Client(api_key)
         
-        # Convert dict or string payload into a clean string representation for the prompt
         stats_content = payload.verified_stats if isinstance(payload.verified_stats, str) else str(payload.verified_stats)
 
         # 6-Section Structured Prompt with Strict Grounding
@@ -59,9 +58,9 @@ async def generate_ai_advisory(payload: AIAdvisoryRequest, x_api_key: str = Head
         """
 
         response = co.chat(
-            model="command-r-plus",
+            model="command-r-plus-08-2024",  # Updated to current supported Cohere model version
             message=prompt,
-            temperature=0.2  # Low temperature to prevent hallucinations and enforce strict accuracy
+            temperature=0.2  # Low temperature to prevent hallucinations
         )
         return {"advisory": response.text}
     except Exception as e:
