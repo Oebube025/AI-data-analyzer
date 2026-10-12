@@ -334,3 +334,114 @@ if uploaded is not None:
 
         st.markdown("---")
         col_w1, col_w2 = st.
+        with col_w1:
+            scenario_name = st.text_input("Scenario Label", value="Growth Plan 1")
+            price_adj = st.slider("Price Adjustment (%)", -50, 50, value=int(st.session_state["sim_price"]))
+            volume_adj = st.slider("Sales Volume Shift (%)", -50, 50, value=int(st.session_state["sim_vol"]))
+        with col_w2:
+            fixed_cost_change = st.number_input("Fixed Expense Adjustment (e.g., +Rent)", value=0.0, step=500.0)
+            variable_cost_pct = st.slider("Variable Expense Shift (%)", -50, 50, value=int(st.session_state["sim_vc"]))
+
+        current_res = calculate_scenario(facts["totals"], price_adj, volume_adj, fixed_cost_change, variable_cost_pct)
+
+        sc1, sc2, sc3, sc4 = st.columns(4)
+        sc1.metric("Projected Sales", f"{currency}{current_res['revenue']:,.2f}", f"{price_adj + volume_adj}%")
+        sc2.metric("Projected Expenses", f"{currency}{current_res['costs']:,.2f}")
+        sc3.metric("Projected Net Profit", f"{currency}{current_res['net_profit']:,.2f}", f"{current_res['profit_delta']:+,.2f}")
+        sc4.metric("Projected Margin", f"{current_res['profit_margin']:.1f}%")
+
+        if st.button("💾 Save Plan to Workspace Database", type="primary"):
+            save_scenario_db(st.session_state["session_id"], scenario_name, current_res)
+            st.success(f"Saved '{scenario_name}' to database!")
+
+        saved_db_scenarios = load_scenarios_db(st.session_state["session_id"])
+        if saved_db_scenarios:
+            st.markdown("### 📊 Stored Growth Models")
+            st.dataframe(pd.DataFrame(saved_db_scenarios)[['scenario_name', 'revenue', 'costs', 'net_profit', 'margin']], use_container_width=True)
+
+        st.markdown("---")
+        st.markdown("### 📈 Estimated Take-Home Profit Matrix (Price vs. Sales Volume)")
+        sens_matrix = generate_sensitivity_matrix(facts["totals"])
+        st.dataframe(pd.DataFrame(sens_matrix), use_container_width=True)
+
+    with tabs[4]: # AI Fractional CFO Brief
+        st.subheader("On-Demand AI Fractional CFO Advisor")
+        st.caption("Generate a plain-English, 6-section CFO brief evaluating your financial health and saved scenarios.")
+        
+        if st.button("Generate AI CFO Advice Brief", type="primary"):
+            with st.spinner("🤖 Analyzing business data & scenarios..."):
+                try:
+                    db_scenarios = load_scenarios_db(st.session_state["session_id"])
+                    res = requests.post(
+                        f"{BACKEND_URL}/api/ai-advisory",
+                        json={"verified_stats": facts, "saved_scenarios": db_scenarios},
+                        headers={"X-API-Key": BACKEND_SECRET_KEY},
+                        timeout=120
+                    )
+                    try:
+                        res_json = res.json()
+                    except Exception:
+                        res_json = {"detail": res.text or "Server error."}
+
+                    if res.status_code == 200:
+                        st.markdown("### 📋 Monthly Business Intelligence Brief")
+                        st.markdown('<div class="saas-card">', unsafe_allow_html=True)
+                        st.markdown(res_json.get("advisory", ""))
+                        st.markdown('</div>', unsafe_allow_html=True)
+                        
+                        log_tenant_activity(
+                            st.session_state.get("user_email", "guest"), 
+                            st.session_state.get("company_name", "SME"), 
+                            "Generated AI CFO Brief"
+                        )
+                    else:
+                        st.error(res_json.get('detail', 'AI advisory request failed.'))
+                except Exception as e:
+                    st.error(f"Connection error: {e}")
+
+    with tabs[5]: # Bank & Investor Pitch Deck
+        st.subheader("Automated Presentation Deck (.pptx)")
+        st.caption("Generate a professional 12-slide presentation deck ready for bank loan applications, partners, or local investors.")
+        
+        if st.button("Generate Pitch Deck (.pptx)", type="primary"):
+            with st.spinner("📊 Building professional presentation deck..."):
+                try:
+                    deck_bytes = create_executive_deck(facts, currency=currency, filename=uploaded.name)
+                    st.session_state["deck_bytes"] = deck_bytes
+                    st.success("✅ Presentation deck generated successfully!")
+                    
+                    log_tenant_activity(
+                        st.session_state.get("user_email", "guest"), 
+                        st.session_state.get("company_name", "SME"), 
+                        "Generated Pitch Deck (.pptx)"
+                    )
+                except Exception as e:
+                    st.error(f"Error generating presentation deck: {e}")
+
+        if "deck_bytes" in st.session_state:
+            st.download_button(
+                label="📥 Download Bank-Ready Deck (.pptx)",
+                data=st.session_state["deck_bytes"],
+                file_name="Business_Financial_Overview.pptx",
+                mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                type="primary"
+            )
+
+    with tabs[6]: # Feedback & Support
+        st.subheader("💬 Direct Founder Feedback & Support")
+        st.caption("Encountered an issue or have a feature request? Send a direct message to the app founder.")
+        
+        with st.form("in_app_feedback_form"):
+            fb_email = st.text_input("Your Email", value=st.session_state.get("user_email", ""))
+            fb_category = st.selectbox("Topic", ["Feature Request", "Bug Report / Error", "General Question", "Praise 🎉"])
+            fb_message = st.text_area("Your Message / Feedback")
+            fb_submit = st.form_submit_button("📨 Submit Feedback")
+            
+            if fb_submit:
+                if fb_message.strip():
+                    save_feedback_db(fb_email, fb_category, fb_message)
+                    st.success("✅ Thank you! Your feedback has been sent directly to the founder.")
+                else:
+                    st.warning("Please enter a message before submitting.")
+else:
+    st.info("👋 Welcome! Please upload your monthly business spreadsheet (.csv or .xlsx) above to begin.")
