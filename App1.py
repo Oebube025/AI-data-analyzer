@@ -1,6 +1,6 @@
 """
-Executive Data Intelligence Suite - Streamlit Frontend (Phase 0 Patched)
-Restores missing features, secure What-If simulation, and clean UI.
+Executive Data Intelligence Suite - Streamlit Frontend (Phase 1 Integrated)
+Powered by Centralized Fact Sheet (analysis.py)
 """
 
 import streamlit as st
@@ -14,6 +14,8 @@ from pptx import Presentation
 from pptx.chart.data import CategoryChartData
 from pptx.enum.chart import XL_CHART_TYPE
 from pptx.util import Inches
+
+from analysis import analyze_dataset
 
 st.set_page_config(
     page_title="Executive Intelligence Suite | Pilot Beta",
@@ -44,27 +46,6 @@ def check_backend_status(token: str):
     except Exception:
         return False
 
-class BusinessDataEngine:
-    def __init__(self, df: pd.DataFrame):
-        self.df = df
-        self.num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
-        self.cat_cols = df.select_dtypes(include=['object', 'category', 'bool']).columns.tolist()
-
-    def clean_text_numeric(self):
-        cleaned = self.df.copy()
-        for col in cleaned.columns:
-            if col not in self.num_cols:
-                sample = cleaned[col].dropna().head(20).astype(str)
-                if sample.str.contains(r'[₦$€£,\(\)]', regex=True).any():
-                    try:
-                        converted = sample.str.replace(r'[₦$€£,]', '', regex=True).str.replace(r'\((.*?)\)', r'-\1', regex=True)
-                        pd.to_numeric(converted, errors='raise')
-                        cleaned[col] = cleaned[col].astype(str).str.replace(r'[₦$€£,]', '', regex=True).str.replace(r'\((.*?)\)', r'-\1', regex=True)
-                        cleaned[col] = pd.to_numeric(cleaned[col], errors='coerce')
-                    except Exception:
-                        pass
-        return cleaned
-
 if "app_state" not in st.session_state:
     st.session_state["app_state"] = "welcome"
     st.session_state["authenticated"] = False
@@ -72,8 +53,8 @@ if "app_state" not in st.session_state:
 if st.session_state["app_state"] == "welcome":
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
-        st.markdown("<br><br><h1 style='text-align: center;'>Executive Intelligence Suite <span class='beta-badge'>PILOT BETA V6.2</span></h1>", unsafe_allow_html=True)
-        st.markdown("<p style='text-align: center; color: #94a3b8; margin-bottom: 30px;'>Automated Analytics, Scenario Modeling & Boardroom AI</p>", unsafe_allow_html=True)
+        st.markdown("<br><br><h1 style='text-align: center;'>Executive Intelligence Suite <span class='beta-badge'>PILOT BETA V6.3</span></h1>", unsafe_allow_html=True)
+        st.markdown("<p style='text-align: center; color: #94a3b8; margin-bottom: 30px;'>Centralized Fact Sheet Architecture & Boardroom AI</p>", unsafe_allow_html=True)
         st.markdown('<div class="saas-card">', unsafe_allow_html=True)
         if st.button("🚀 Launch Executive Workspace", type="primary"):
             st.session_state["app_state"] = "main"
@@ -112,45 +93,43 @@ if uploaded is not None:
                 df = pd.read_excel(io.BytesIO(file_bytes))
 
             st.session_state["active_df"] = df.copy()
-            
-            # Check backend response
-            resp = requests.post(
-                f"{BACKEND_URL}/api/analyze", 
-                files={"file": (uploaded.name, file_bytes, "text/csv")}, 
-                headers={"X-API-Key": BACKEND_SECRET_KEY}
-            )
-            if resp.status_code != 200:
-                st.warning(f"Backend analysis warning: {resp.json().get('detail', 'Unknown error')}")
         except Exception as e:
             st.error(f"Error parsing file: {e}")
             st.stop()
 
     df = st.session_state["active_df"]
-    engine = BusinessDataEngine(df)
-    df_cleaned = engine.clean_text_numeric()
 
+    # Sidebar controls for mapping
     st.sidebar.markdown("### ⚙️ Executive Mapping")
     currency = st.sidebar.selectbox("Display Currency", ["₦", "$", "€", "£"])
-    valid_nums = [c for c in engine.num_cols if not any(k in c.lower() for k in ['id', 'code', 'year'])]
-    sel_rev = st.sidebar.selectbox("Revenue Column", valid_nums if valid_nums else engine.num_cols)
-    sel_cost = st.sidebar.selectbox("Cost Column", ["None"] + (valid_nums if valid_nums else engine.num_cols))
     
-    cat_col_options = ["None"] + engine.cat_cols
-    sel_cat = st.sidebar.selectbox("Category / Group Column", cat_col_options)
+    num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+    cat_cols = df.select_dtypes(include=['object', 'category', 'bool']).columns.tolist()
+    
+    valid_nums = [c for c in num_cols if not any(k in c.lower() for k in ['id', 'code', 'year'])]
+    sel_rev = st.sidebar.selectbox("Revenue Column", valid_nums if valid_nums else num_cols)
+    sel_cost = st.sidebar.selectbox("Cost Column", ["None"] + (valid_nums if valid_nums else num_cols))
+    sel_cat = st.sidebar.selectbox("Category / Group Column", ["None"] + cat_cols)
+
+    # GENERATE CENTRALIZED FACT SHEET (Single Source of Truth)
+    facts = analyze_dataset(df, revenue_col=sel_rev, cost_col=sel_cost, category_col=sel_cat)
 
     st.sidebar.markdown("---")
     st.sidebar.markdown("### 🔒 Pilot Beta Notice")
-    st.sidebar.info("Data is processed securely for this session. Please review our privacy terms before uploading sensitive enterprise data.")
+    st.sidebar.info("Data is processed securely for this session using centralized fact sheets.")
 
-    # Tabs restored from earlier versions plus new enhancements
     tabs = st.tabs(["📊 Command Center", "📈 Trends & Leaderboard", "🔍 Data Health & Anomalies", "🎛️ What-If Simulator", "🧠 AI Advisory", "📈 Boardroom Deck", "📝 Feedback"])
 
     with tabs[0]: # Command Center
         st.subheader("Executive Financial Command Center")
-        tot_rev = df_cleaned[sel_rev].sum() if sel_rev in df_cleaned else 0.0
-        tot_cost = df_cleaned[sel_cost].sum() if sel_cost != "None" and sel_cost in df_cleaned else 0.0
-        profit = tot_rev - tot_cost
-        margin = (profit / tot_rev * 100) if tot_rev > 0 else 0.0
+        if facts["warnings"]:
+            for warning in facts["warnings"]:
+                st.warning(f"⚠️ {warning}")
+
+        tot_rev = facts["totals"]["total_revenue"]
+        tot_cost = facts["totals"]["total_costs"]
+        profit = facts["totals"]["net_profit"]
+        margin = facts["totals"]["profit_margin"]
         
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("Total Revenue", f"{currency}{tot_rev:,.2f}")
@@ -159,45 +138,36 @@ if uploaded is not None:
         c4.metric("Profit Margin", f"{margin:.1f}%")
         
         st.markdown("### Dataset Preview")
-        st.dataframe(df_cleaned.head(10), use_container_width=True)
+        st.dataframe(df.head(10), use_container_width=True)
 
-    with tabs[1]: # Trends & Leaderboard (Restored feature)
+    with tabs[1]: # Trends & Leaderboard
         st.subheader("Performance Trends & Leaderboards")
-        if sel_cat != "None" and sel_cat in df_cleaned and sel_rev in df_cleaned:
-            grouped = df_cleaned.groupby(sel_cat)[sel_rev].sum().reset_index().sort_values(by=sel_rev, ascending=False)
+        if sel_cat != "None" and facts["revenue_by_category"]:
+            grouped_df = pd.DataFrame(list(facts["revenue_by_category"].items()), columns=[sel_cat, sel_rev])
             col_t1, col_t2 = st.columns(2)
             with col_t1:
                 st.markdown("#### Top Categories by Revenue")
-                st.dataframe(grouped.head(10), use_container_width=True)
+                st.dataframe(grouped_df.head(10), use_container_width=True)
             with col_t2:
-                fig = px.bar(grouped.head(10), x=sel_cat, y=sel_rev, title=f"Top 10 {sel_cat} by {sel_rev}", template="plotly_dark")
+                fig = px.bar(grouped_df.head(10), x=sel_cat, y=sel_rev, title=f"Top {sel_cat} by {sel_rev}", template="plotly_dark")
                 st.plotly_chart(fig, use_container_width=True)
         else:
-            st.info("Please select a valid Category Column in the sidebar to view leaderboards and category breakdowns.")
+            st.info("Please select a valid Category Column in the sidebar to view leaderboards.")
 
-    with tabs[2]: # Data Health & Anomalies (Restored feature)
+    with tabs[2]: # Data Health & Anomalies
         st.subheader("Data Quality Audit & Anomaly Detection")
-        total_cells = df.size
-        missing_cells = df.isna().sum().sum()
-        health = max(0.0, min(100.0, ((total_cells - missing_cells) / max(1, total_cells)) * 100))
-        
-        dh1, dh2 = st.columns(2)
-        dh1.metric("Data Health Index", f"{health:.1f}%", f"{missing_cells} missing cells")
-        dh2.metric("Duplicate Rows", f"{df.duplicated().sum():,}")
+        dh1, dh2, dh3 = st.columns(3)
+        dh1.metric("Data Health Index", f"{facts['metadata']['data_health_index']}%")
+        dh2.metric("Missing Cells", f"{facts['metadata']['missing_cells']:,}")
+        dh3.metric("Duplicate Rows", f"{facts['metadata']['duplicate_rows']:,}")
 
-        if sel_rev in df_cleaned:
-            q1 = df_cleaned[sel_rev].quantile(0.25)
-            q3 = df_cleaned[sel_rev].quantile(0.75)
-            iqr = q3 - q1
-            upper_bound = q3 + 1.5 * iqr
-            outliers = df_cleaned[df_cleaned[sel_rev] > upper_bound]
-            st.markdown(f"#### Potential Revenue Outliers / Anomalies (> Q3 + 1.5*IQR)")
-            if not outliers.empty:
-                st.dataframe(outliers.head(10), use_container_width=True)
-            else:
-                st.success("No significant outliers detected in revenue distribution.")
+        st.markdown("#### Potential Revenue Outliers / Anomalies")
+        if facts["anomalies"]:
+            st.dataframe(pd.DataFrame(facts["anomalies"]), use_container_width=True)
+        else:
+            st.success("No significant outliers detected in revenue distribution.")
 
-    with tabs[3]: # What-If Simulator (Pure Pandas implementation)
+    with tabs[3]: # What-If Simulator
         st.subheader("Dynamic What-If Financial Scenario Modeling")
         st.caption("Adjust pricing, volume, and cost structures to model real-time profit sensitivity.")
         
@@ -210,11 +180,8 @@ if uploaded is not None:
             variable_cost_pct = st.slider("Variable Cost Adjustment (%)", -50, 50, 0)
 
         if st.button("Calculate Scenario", type="primary"):
-            base_rev = df_cleaned[sel_rev].sum() if sel_rev in df_cleaned else 0.0
-            base_cost = df_cleaned[sel_cost].sum() if sel_cost != "None" and sel_cost in df_cleaned else 0.0
-            
-            sim_rev = base_rev * (1 + price_adj / 100.0) * (1 + volume_adj / 100.0)
-            sim_cost = (base_cost * (1 + variable_cost_pct / 100.0)) + fixed_cost_change
+            sim_rev = tot_rev * (1 + price_adj / 100.0) * (1 + volume_adj / 100.0)
+            sim_cost = (tot_cost * (1 + variable_cost_pct / 100.0)) + fixed_cost_change
             sim_profit = sim_rev - sim_cost
 
             sc1, sc2, sc3 = st.columns(3)
@@ -222,24 +189,26 @@ if uploaded is not None:
             sc2.metric("Simulated Costs", f"{currency}{sim_cost:,.2f}")
             sc3.metric("Simulated Net Profit", f"{currency}{sim_profit:,.2f}", f"{sim_profit - profit:+,.2f}")
 
-    with tabs[4]: # AI Advisory (Restored feature)
+    with tabs[4]: # AI Advisory
         st.subheader("Executive AI Business Advisor")
         st.caption("Generate professional AI insights based on your verified dataset statistics.")
         if st.button("Generate AI Advisory Report", type="primary"):
-            stats_summary = f"Dataset: {uploaded.name}, Records: {len(df):,}, Total Revenue: {tot_rev:,.2f}, Total Costs: {tot_cost:,.2f}, Net Profit: {profit:,.2f}, Margin: {margin:.1f}%"
-            try:
-                res = requests.post(
-                    f"{BACKEND_URL}/api/ai-advisory",
-                    json={"verified_stats": stats_summary},
-                    headers={"X-API-Key": BACKEND_SECRET_KEY},
-                    timeout=120
-                )
-                if res.status_code == 200:
-                    st.markdown(res.json().get("advisory", ""))
-                else:
-                    st.error(res.json().get("detail", "AI advisory request failed."))
-            except Exception as e:
-                st.error(f"Connection error: {e}")
+            stats_summary = f"Dataset: {uploaded.name}, Records: {facts['metadata']['total_records']:,}, Total Revenue: {tot_rev:,.2f}, Total Costs: {tot_cost:,.2f}, Net Profit: {profit:,.2f}, Margin: {margin:.1f}%"
+            with st.spinner("🤖 Generating executive advisory report via Cohere AI..."):
+                try:
+                    res = requests.post(
+                        f"{BACKEND_URL}/api/ai-advisory",
+                        json={"verified_stats": stats_summary},
+                        headers={"X-API-Key": BACKEND_SECRET_KEY},
+                        timeout=120
+                    )
+                    if res.status_code == 200:
+                        st.markdown("### 📊 Executive AI Insights")
+                        st.markdown(res.json().get("advisory", ""))
+                    else:
+                        st.error(res.json().get('detail', 'AI advisory request failed.'))
+                except Exception as e:
+                    st.error(f"Connection error: {e}")
 
     with tabs[5]: # Boardroom Deck
         st.subheader("Automated Boardroom Presentation Generator")
@@ -259,7 +228,7 @@ if uploaded is not None:
 
     with tabs[6]: # Feedback
         st.subheader("Pilot Beta Feedback & Support")
-        st.markdown("We value your input as an initial tester for App1 v6.2!")
+        st.markdown("We value your input as an initial tester for App1 v6.3!")
         st.markdown("👉 **[Submit Feedback via Google Forms](https://forms.gle/your-feedback-link)**")
 else:
     st.info("👋 Welcome to App1! Please upload your dataset above to initialize the executive suite.")
