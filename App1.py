@@ -1,7 +1,6 @@
 """
 FINCH - AI Business Intelligence Frontend (App1.py)
-Rebranded to FINCH with integrated logo[cite: 4], animated splash screen, 
-retail data audits, and secure workspace navigation.
+With pure Inline SVG Geometric Finch Logo and wing-flapping swoop animation.
 """
 
 import hashlib
@@ -25,12 +24,12 @@ from database import (init_db, load_scenarios_db, save_scenario_db, delete_scena
 from deck_builder import create_executive_deck
 from simulator import calculate_scenario, generate_sensitivity_matrix
 
-APP_VERSION = "2.2"
+APP_VERSION = "2.3"
 
 st.set_page_config(page_title="FINCH | AI Business Intelligence", page_icon="🐦",
                    layout="wide", initial_sidebar_state="expanded")
 
-# --- SIGNATURE DARK GLASSMORPHISM & CLAYMORPHISM STYLING WITH FINCH ANIMATION ---
+# --- SIGNATURE DARK GLASSMORPHISM & PURE SVG ANIMATED FINCH LOGO ---
 st.markdown("""
 <style>
     .stApp { background-color: #0b0f19; color: #f1f5f9; font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; }
@@ -48,38 +47,45 @@ st.markdown("""
     div[data-testid="stMetric"] label { color: #94a3b8 !important; font-weight: 500; font-size: 0.85rem !important; text-transform: uppercase; }
     div[data-testid="stMetric"] [data-testid="stMetricValue"] { color: #f8fafc !important; font-weight: 700; }
     .beta-badge { 
-        background: linear-gradient(135deg, #0f7b5f 0%, #0d654d 100%); color: #ffffff; 
-        font-size: 0.7rem; font-weight: 700; padding: 4px 10px; border-radius: 20px; margin-left: 8px; text-transform: uppercase; 
+        background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: #ffffff; 
+        font-size: 0.75rem; font-weight: 700; padding: 4px 10px; border-radius: 20px; margin-left: 8px; text-transform: uppercase; 
     }
     h1, h2, h3 { color: #f8fafc; letter-spacing: -0.03em; font-weight: 700; }
     .stButton>button { 
-        background: linear-gradient(135deg, #0f7b5f 0%, #0d654d 100%); color: white; border: none; border-radius: 12px; 
-        font-weight: 600; padding: 0.6rem 1.2rem; width: 100%; box-shadow: inset 0 2px 4px rgba(255, 255, 255, 0.2), 0 6px 16px rgba(15, 123, 95, 0.4);
+        background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: white; border: none; border-radius: 12px; 
+        font-weight: 600; padding: 0.6rem 1.2rem; width: 100%; box-shadow: inset 0 2px 4px rgba(255, 255, 255, 0.2), 0 6px 16px rgba(16, 185, 129, 0.4);
     }
-    .stButton>button:hover { background: linear-gradient(135deg, #0d654d 0%, #0a523f 100%); transform: translateY(-1px); }
+    .stButton>button:hover { background: linear-gradient(135deg, #059669 0%, #047857 100%); transform: translateY(-1px); }
 
-    /* --- SWOOPING & FLAPPING SPLASH ANIMATION --- */
-    @keyframes swoopIn {
-        0% { transform: translate(-400px, 200px) scale(0.3) rotate(-25deg); opacity: 0; }
-        50% { transform: translate(50px, -30px) scale(1.1) rotate(10deg); opacity: 1; }
-        70% { transform: translate(-20px, 10px) scale(0.95) rotate(-5deg); opacity: 1; }
+    /* --- ANIMATION: FLYING & FLAPPING FINCH BIRD --- */
+    @keyframes flyInSwoop {
+        0% { transform: translate(-350px, -150px) scale(0.2) rotate(-35deg); opacity: 0; }
+        50% { transform: translate(60px, 30px) scale(1.1) rotate(15deg); opacity: 1; }
+        75% { transform: translate(-15px, -10px) scale(0.95) rotate(-5deg); opacity: 1; }
         100% { transform: translate(0, 0) scale(1) rotate(0deg); opacity: 1; }
     }
-    @keyframes flapWings {
-        0%, 100% { transform: translateY(0) scaleY(1); }
-        50% { transform: translateY(-6px) scaleY(0.94); }
+
+    @keyframes wingFlap {
+        0%, 100% { transform: rotate(0deg) scaleY(1); }
+        50% { transform: rotate(-12deg) scaleY(0.85); }
     }
-    .finch-logo-container {
+
+    .finch-splash-container {
         display: flex;
-        justify-content: center;
+        flex-direction: column;
         align-items: center;
+        justify-content: center;
+        margin-top: 20px;
         margin-bottom: 20px;
     }
-    .finch-animated-logo {
-        width: 220px;
-        border-radius: 24px;
-        box-shadow: 0 20px 40px rgba(0,0,0,0.7);
-        animation: swoopIn 1.4s cubic-bezier(0.25, 1, 0.5, 1) forwards, flapWings 2.5s ease-in-out infinite 1.4s;
+
+    .finch-svg-wrapper {
+        animation: flyInSwoop 1.6s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+    }
+
+    .finch-wing-animated {
+        transform-origin: 100px 120px;
+        animation: wingFlap 0.8s ease-in-out infinite 1.6s;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -161,23 +167,36 @@ if not st.session_state.get("user"):
     if st.session_state["nav_state"] == "splash":
         _, col, _ = st.columns([1, 2.5, 1])
         with col:
-            st.markdown("<br>", unsafe_allow_html=True)
+            # --- PURE SVG EXACT FINCH LOGO RECREATION WITH ANIMATION ---
+            finch_svg_html = """
+            <div class="finch-splash-container">
+                <div class="finch-svg-wrapper">
+                    <svg width="180" height="150" viewBox="0 0 200 180" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <!-- Head & Beak (Orange/Gold) -->
+                        <path d="M 120 45 C 135 30, 155 35, 150 55 C 145 70, 125 70, 115 55 Z" fill="#F5A623" stroke="#FFFFFF" stroke-width="1.5" />
+                        <circle cx="138" cy="45" r="3.5" fill="#0B0F19" />
+                        
+                        <!-- Growth Arrow Beak -->
+                        <path d="M 148 50 L 175 25 M 175 25 L 163 25 M 175 25 L 175 37" stroke="#F5A623" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"/>
+                        
+                        <!-- Geometric Body (Teal) -->
+                        <path d="M 90 70 C 110 50, 130 60, 125 90 C 115 120, 85 130, 75 105 Z" fill="#0F7B5F" stroke="#FFFFFF" stroke-width="1.5"/>
+                        <path d="M 75 105 L 95 135 L 70 120 Z" fill="#0D654D" stroke="#FFFFFF" stroke-width="1.5"/>
+                        <path d="M 70 120 L 55 145 L 80 130 Z" fill="#0A523F" stroke="#FFFFFF" stroke-width="1.5"/>
+                        
+                        <!-- Animated Geometric Wings -->
+                        <g class="finch-wing-animated">
+                            <path d="M 100 70 L 65 30 L 85 65 Z" fill="#10B981" stroke="#FFFFFF" stroke-width="1.5"/>
+                            <path d="M 85 65 L 50 38 L 75 80 Z" fill="#0F7B5F" stroke="#FFFFFF" stroke-width="1.5"/>
+                            <path d="M 75 80 L 42 52 L 68 95 Z" fill="#0D654D" stroke="#FFFFFF" stroke-width="1.5"/>
+                        </g>
+                    </svg>
+                </div>
+            </div>
+            """
+            st.markdown(finch_svg_html, unsafe_allow_html=True)
             
-            # --- ANIMATED FINCH LOGO EMBED ---
-            logo_path = "finch_logo.png"
-            if not os.path.exists(logo_path):
-                logo_path = "Finch.jpeg"
-            
-            if os.path.exists(logo_path):
-                st.markdown("""
-                    <div class="finch-logo-container">
-                        <img src="app/static/finch_logo.png" class="finch-animated-logo" />
-                    </div>
-                """, unsafe_allow_html=True)
-                # Fallback to Streamlit image if static path needs direct rendering
-                st.image(logo_path, width=220)
-            
-            st.markdown("<h1 style='text-align:center;'>FINCH <span class='beta-badge'>PILOT v2.2</span></h1>", unsafe_allow_html=True)
+            st.markdown("<h1 style='text-align:center;'>FINCH <span class='beta-badge'>PILOT v2.3</span></h1>", unsafe_allow_html=True)
             st.markdown("<p style='text-align:center;color:#94a3b8;font-size:1.1rem;margin-bottom:30px;'>"
                         "Transform business transaction exports into structured financial reports, "
                         "growth scenarios, and automated AI insights.</p>", unsafe_allow_html=True)
@@ -383,7 +402,7 @@ with tabs[0]:
                          y=[totals["total_revenue"], totals["total_costs"], totals["net_profit"]],
                          title="Financial Overview", labels={"x": "Metric", "y": f"Amount ({currency})"},
                          color=["Revenue", "Costs", "Net Profit"],
-                         color_discrete_map={"Revenue": "#0f7b5f", "Costs": "#64748b", "Net Profit": "#10b981"},
+                         color_discrete_map={"Revenue": "#10b981", "Costs": "#64748b", "Net Profit": "#059669"},
                          template="plotly_dark")
         else:
             fig = px.histogram(df, x=sel_rev, title=f"Distribution of {sel_rev}", template="plotly_dark")
@@ -395,7 +414,7 @@ with tabs[0]:
             bar_df = pd.DataFrame(list(rbc.items())[:8], columns=["Category", "Revenue"]).sort_values("Revenue", ascending=True)
             fig_bar = px.bar(bar_df, x="Revenue", y="Category", orientation="h",
                              title=f"Top Categories by Revenue",
-                             template="plotly_dark", color_discrete_sequence=["#0f7b5f"])
+                             template="plotly_dark", color_discrete_sequence=["#10b981"])
             fig_bar.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
             st.plotly_chart(fig_bar, use_container_width=True)
         else:
