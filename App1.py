@@ -1,7 +1,7 @@
 """
 Executive Data Intelligence Suite - Streamlit Frontend (App1.py)
-Fail-closed configuration, secure authentication, imported delete_scenarios_db,
-and strict email-verified admin panel.
+Dark Glassmorphism & Claymorphism UI, 4-Tab Layout, Sample Data Loader, 
+Heatmap Sensitivity Matrix, and Secured Admin Portal.
 """
 
 import hashlib
@@ -9,10 +9,8 @@ import hmac
 import io
 import os
 import re
-import time
 import duckdb
 
-import numpy as np
 import pandas as pd
 import plotly.express as px
 import requests
@@ -27,12 +25,12 @@ from database import (init_db, load_scenarios_db, save_scenario_db, delete_scena
 from deck_builder import create_executive_deck
 from simulator import calculate_scenario, generate_sensitivity_matrix
 
-APP_VERSION = "1.6"
+APP_VERSION = "2.0"
 
-st.set_page_config(page_title="Executive Intelligence Suite | Pilot Beta", page_icon="📊",
+st.set_page_config(page_title="AI CFO Suite | Pilot Beta", page_icon="📊",
                    layout="wide", initial_sidebar_state="expanded")
 
-# --- MODERN DARK GLASSMORPHISM & CLAYMORPHISM STYLING ---
+# --- SIGNATURE DARK GLASSMORPHISM & CLAYMORPHISM STYLING ---
 st.markdown("""
 <style>
     .stApp { background-color: #0b0f19; color: #f1f5f9; font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; }
@@ -49,6 +47,12 @@ st.markdown("""
     }
     div[data-testid="stMetric"] label { color: #94a3b8 !important; font-weight: 500; font-size: 0.85rem !important; text-transform: uppercase; }
     div[data-testid="stMetric"] [data-testid="stMetricValue"] { color: #f8fafc !important; font-weight: 700; }
+    .verdict-banner {
+        background: linear-gradient(135deg, rgba(37, 99, 235, 0.2) 0%, rgba(15, 23, 42, 0.8) 100%);
+        border: 1px solid rgba(59, 130, 246, 0.4); padding: 20px 24px; border-radius: 14px;
+        font-size: 1.15rem; font-weight: 600; color: #f8fafc; margin-bottom: 24px;
+        box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+    }
     .beta-badge { 
         background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%); color: #ffffff; 
         font-size: 0.7rem; font-weight: 700; padding: 4px 10px; border-radius: 20px; margin-left: 8px; text-transform: uppercase; 
@@ -64,7 +68,6 @@ st.markdown("""
 
 
 def get_required_secret(name: str) -> str:
-    """Fail closed immediately if a required secret is missing."""
     val = st.secrets.get(name, os.getenv(name))
     if not val:
         st.error(f"❌ Critical Configuration Error: Required secret '{name}' is missing in Streamlit secrets.")
@@ -114,7 +117,13 @@ def read_upload(name: str, data: bytes, sheet=None) -> pd.DataFrame:
     raise last_err
 
 
-def money(v, cur):
+def format_compact(v, cur):
+    if v is None or pd.isna(v):
+        return "n/a"
+    if abs(v) >= 1_000_000:
+        return f"{cur}{v/1_000_000:.1f}M"
+    if abs(v) >= 1_000:
+        return f"{cur}{v/1_000:.1f}K"
     return f"{cur}{v:,.2f}"
 
 
@@ -126,7 +135,18 @@ def idx(options, value):
     return options.index(value) if value in options else 0
 
 
-# ----------------------------------------------------------------- SPLASH & AUTH STATE MACHINE
+# --- SAMPLE DATA GENERATOR ---
+def get_sample_dataframe() -> pd.DataFrame:
+    data = {
+        "Order_Date": ["01/08/2026", "10/08/2026", "15/08/2026", "02/09/2026", "14/09/2026", "25/09/2026", "05/10/2026", "12/10/2026"],
+        "Product_Category": ["SaaS Subscription", "Enterprise Tier", "Consulting", "SaaS Subscription", "Add-on Module", "Enterprise Tier", "Consulting", "SaaS Subscription"],
+        "Revenue_NGN": [450000, 1200000, 350000, 480000, 150000, 1350000, 400000, 500000],
+        "Cost_NGN": [120000, 300000, 100000, 130000, 40000, 320000, 110000, 135000]
+    }
+    return pd.DataFrame(data)
+
+
+# ----------------------------------------------------------------- AUTH STATE MACHINE
 if not st.session_state.get("user"):
     if "nav_state" not in st.session_state:
         st.session_state["nav_state"] = "splash"
@@ -135,14 +155,14 @@ if not st.session_state.get("user"):
         _, col, _ = st.columns([1, 2.5, 1])
         with col:
             st.markdown("<br><br>", unsafe_allow_html=True)
-            st.markdown("<h1 style='text-align:center;'>💼 AI CFO Suite <span class='beta-badge'>PILOT v1.6</span></h1>", unsafe_allow_html=True)
+            st.markdown("<h1 style='text-align:center;'>💼 AI CFO Suite <span class='beta-badge'>PILOT v2.0</span></h1>", unsafe_allow_html=True)
             st.markdown("<p style='text-align:center;color:#94a3b8;font-size:1.1rem;margin-bottom:30px;'>"
-                        "Turn messy monthly business records (Excel, QuickBooks, Shopify) into bank-ready financial reports, "
+                        "Transform business transaction exports into bank-ready financial reports, "
                         "growth scenarios, and automated CFO briefs in 60 seconds.</p>", unsafe_allow_html=True)
             
             c1, c2, c3 = st.columns(3)
-            c1.metric("Speed", "60 Sec", "Automated")
-            c2.metric("Reports", "12-Slide", "Bank-Ready")
+            c1.metric("Audit Speed", "Instant", "Automated")
+            c2.metric("Reporting", "12-Slide", "Bank-Ready")
             c3.metric("Insights", "CFO AI", "On-Demand")
             
             st.markdown("<br>", unsafe_allow_html=True)
@@ -154,7 +174,7 @@ if not st.session_state.get("user"):
     else:
         _, col, _ = st.columns([1, 2, 1])
         with col:
-            st.markdown(f"<br><br><h1 style='text-align:center;'>Executive Intelligence Suite</h1>", unsafe_allow_html=True)
+            st.markdown(f"<br><br><h1 style='text-align:center;'>Secure Access Portal</h1>", unsafe_allow_html=True)
             tab_login, tab_signup = st.tabs(["Log in", "Create account"])
 
             with tab_login:
@@ -201,41 +221,59 @@ if not st.session_state.get("user"):
 USER = st.session_state["user"]
 USER_EMAIL = get_user_email(USER)
 
-# ------------------------------------------------------------- WORKSPACE
+# ------------------------------------------------------------- WORKSPACE & SAMPLE DATA
 if not check_backend_status(BACKEND_URL, BACKEND_SECRET_KEY):
     st.warning("⚠️ Backend API is waking up or offline. AI advisory may not work yet.")
 
 uploaded = st.file_uploader("📁 Upload your sales or business records (.csv or .xlsx, max 10MB)", type=["csv", "xlsx"])
-if uploaded is None:
-    st.info("👋 Upload your sales or business records above to get started, or check your **History** tab for past audits.")
-    
-    st.markdown("---")
-    st.subheader("📂 Your Past Saved Audits & History")
-    history_records = load_user_history_db(USER_EMAIL)
-    if history_records:
-        st.dataframe(pd.DataFrame(history_records)[["file_name", "total_revenue", "net_profit", "profit_margin", "timestamp"]], use_container_width=True)
-    else:
-        st.info("No past audit records found for this account yet.")
-    st.stop()
 
-data = uploaded.getvalue()
-if len(data) / (1024 * 1024) > 10:
+if uploaded is None:
+    col_a, col_b = st.columns(2)
+    with col_a:
+        if st.button("✨ Try with sample data"):
+            sample_df = get_sample_dataframe()
+            csv_bytes = sample_df.to_csv(index=False).encode("utf-8")
+            st.session_state["sample_upload_bytes"] = csv_bytes
+            st.session_state["sample_filename"] = "sample_business_records.csv"
+            st.rerun()
+    with col_b:
+        sample_df_dl = get_sample_dataframe()
+        st.download_button("📥 Download Sample CSV Template", data=sample_df_dl.to_csv(index=False), file_name="template_business_records.csv", mime="text/csv")
+
+    if "sample_upload_bytes" in st.session_state:
+        uploaded_data = st.session_state["sample_upload_bytes"]
+        uploaded_name = st.session_state["sample_filename"]
+    else:
+        st.info("👋 Upload your business records above, or click **Try with sample data** to test instantly.")
+        st.markdown("---")
+        st.subheader("📂 Your Past Saved Audits & History")
+        history_records = load_user_history_db(USER_EMAIL)
+        if history_records:
+            st.dataframe(pd.DataFrame(history_records)[["file_name", "total_revenue", "net_profit", "profit_margin", "timestamp"]], use_container_width=True)
+        else:
+            st.info("No past audit records found for this account yet.")
+        st.stop()
+else:
+    uploaded_data = uploaded.getvalue()
+    uploaded_name = uploaded.name
+
+if len(uploaded_data) / (1024 * 1024) > 10:
     st.error("❌ File size exceeds the strict 10MB limit.")
     st.stop()
 
 sheet = None
-if uploaded.name.lower().endswith(".xlsx"):
+if uploaded_name.lower().endswith(".xlsx"):
     try:
-        sheets = pd.ExcelFile(io.BytesIO(data), engine="openpyxl").sheet_names
+        sheets = pd.ExcelFile(io.BytesIO(uploaded_data), engine="openpyxl").sheet_names
     except Exception as e:
         st.error(f"Could not open the Excel file: {e}")
         st.stop()
     sheet = st.selectbox("Sheet", sheets) if len(sheets) > 1 else sheets[0]
 
-data_key = f"{hashlib.md5(data).hexdigest()}:{sheet}"
+data_key = f"{hashlib.md5(uploaded_data).hexdigest()}:{sheet}"
 if st.session_state.get("data_key") != data_key:
     try:
-        raw = read_upload(uploaded.name, data, sheet)
+        raw = read_upload(uploaded_name, uploaded_data, sheet)
     except Exception as e:
         st.error(f"Error parsing file: {e}")
         st.stop()
@@ -246,13 +284,13 @@ if st.session_state.get("data_key") != data_key:
     st.session_state.update(data_key=data_key, active_df=clean, prep_notes=notes,
                             suggested=suggest_columns(clean))
     st.session_state.pop("deck_bytes", None)
-    log_tenant_activity(USER_EMAIL, f"Uploaded File: {uploaded.name}", increment_upload=True)
+    log_tenant_activity(USER_EMAIL, f"Uploaded File: {uploaded_name}", increment_upload=True)
 
 df = st.session_state["active_df"]
 notes = st.session_state["prep_notes"]
 sug = st.session_state["suggested"]
 
-st.sidebar.markdown("### ⚙️ Tell us about your columns")
+st.sidebar.markdown("### ⚙️ Workspace Configuration")
 currency = st.sidebar.selectbox("Currency", ["₦", "$", "€", "£"])
 
 nums = valid_numeric_columns(df)
@@ -262,13 +300,14 @@ if not nums:
 cats = [c for c in df.columns if not pd.api.types.is_numeric_dtype(df[c]) or pd.api.types.is_bool_dtype(df[c])]
 cats = [c for c in cats if not pd.api.types.is_datetime64_any_dtype(df[c])]
 
-sel_rev = st.sidebar.selectbox("Revenue Column", nums, index=idx(nums, sug["revenue"]))
-cost_opts = ["None"] + [c for c in nums if c != sel_rev]
-sel_cost = st.sidebar.selectbox("Cost Column", cost_opts, index=idx(cost_opts, sug["cost"]))
-cat_opts = ["None"] + cats
-sel_cat = st.sidebar.selectbox("Category / Group Column", cat_opts, index=idx(cat_opts, sug["category"]))
-date_opts = ["None"] + list(df.columns)
-sel_date = st.sidebar.selectbox("Date / Time Column (Optional)", date_opts, index=idx(date_opts, sug["date"]))
+with st.sidebar.expander("🔍 How we read your file (Column Mapping)"):
+    sel_rev = st.selectbox("Revenue Column", nums, index=idx(nums, sug["revenue"]))
+    cost_opts = ["None"] + [c for c in nums if c != sel_rev]
+    sel_cost = st.selectbox("Cost Column", cost_opts, index=idx(cost_opts, sug["cost"]))
+    cat_opts = ["None"] + cats
+    sel_cat = st.selectbox("Category / Group Column", cat_opts, index=idx(cat_opts, sug["category"]))
+    date_opts = ["None"] + list(df.columns)
+    sel_date = st.selectbox("Date / Time Column (Optional)", date_opts, index=idx(date_opts, sug["date"]))
 
 facts = get_facts(df, sel_rev, sel_cost, sel_cat, sel_date, tuple(notes))
 totals, meta, trend = facts["totals"], facts["metadata"], facts["trend"]
@@ -297,20 +336,33 @@ if is_admin:
                 st.info("No tenant data recorded yet.")
             conn.close()
 
-tabs = st.tabs(["📊 Overview", "📈 Trends & Best Sellers", "🔍 Data Check",
-                "🎛️ What-If Planner", "🧠 AI Advice", "📈 Business Report", "📂 History", "📝 Feedback"])
+# --- STREAMLINED 4-TAB NAVIGATION ---
+tabs = st.tabs(["📊 Summary", "📈 Trends", "🎛️ What-If", "📁 Reports & History"])
 
 with tabs[0]:
-    st.subheader("Your Business at a Glance")
-    if not cost_known:
-        st.warning("⚠️ **Note:** No cost column selected. Profit and margin figures in scenarios are modelled using cost assumptions.")
-    for w in facts["warnings"]:
-        st.warning(f"⚠️ {w}")
+    st.subheader("Executive Summary")
+    
+    # --- ONE-LINE VERDICT BANNER ---
+    profit_val = totals["net_profit"] if cost_known else 0.0
+    margin_val = totals["profit_margin"]
+    if cost_known:
+        verdict_text = f"✨ **Verdict:** You generated **{format_compact(totals['total_revenue'], currency)}** in revenue with **{format_compact(profit_val, currency)}** net profit ({pct(margin_val)} margin). Financial health is stable."
+    else:
+        verdict_text = f"✨ **Verdict:** You generated **{format_compact(totals['total_revenue'], currency)}** in revenue. Select a cost column to evaluate net profitability."
+    st.markdown(f'<div class="verdict-banner">{verdict_text}</div>', unsafe_allow_html=True)
 
+    if notes:
+        with st.expander("ℹ️ What we did to your file (Data Prep & Cleaning)"):
+            for n in notes:
+                st.markdown(f"- {n}")
+            for w in facts["warnings"]:
+                st.markdown(f"⚠️ {w}")
+
+    # --- PROMINENT METRIC BLOCKS ---
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Total Revenue", money(totals["total_revenue"], currency))
-    c2.metric("Total Costs", money(totals["total_costs"], currency) if cost_known else "Not provided")
-    c3.metric("Net Profit", money(totals["net_profit"], currency) if cost_known else "n/a")
+    c1.metric("Net Profit", format_compact(totals["net_profit"], currency) if cost_known else "n/a")
+    c2.metric("Total Revenue", format_compact(totals["total_revenue"], currency))
+    c3.metric("Total Costs", format_compact(totals["total_costs"], currency) if cost_known else "Not provided")
     c4.metric("Profit Margin", pct(totals["profit_margin"]))
     st.markdown("---")
 
@@ -320,7 +372,9 @@ with tabs[0]:
             fig = px.bar(x=["Revenue", "Costs", "Net Profit"],
                          y=[totals["total_revenue"], totals["total_costs"], totals["net_profit"]],
                          title="Financial Overview", labels={"x": "Metric", "y": f"Amount ({currency})"},
-                         color=["Revenue", "Costs", "Net Profit"], template="plotly_dark")
+                         color=["Revenue", "Costs", "Net Profit"],
+                         color_discrete_map={"Revenue": "#3b82f6", "Costs": "#64748b", "Net Profit": "#10b981"},
+                         template="plotly_dark")
         else:
             fig = px.histogram(df, x=sel_rev, title=f"Distribution of {sel_rev}", template="plotly_dark")
         fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
@@ -328,17 +382,14 @@ with tabs[0]:
     with g2:
         rbc = facts["revenue_by_category"]
         if rbc:
-            pie_df = pd.DataFrame(list(rbc.items())[:6], columns=["Category", "Revenue"])
-            pie_df = pie_df[pie_df["Revenue"] > 0]
-            fig_pie = px.pie(pie_df, names="Category", values="Revenue",
-                             title=f"Top {meta['category_column']} Revenue Share",
-                             template="plotly_dark", hole=0.4)
-            fig_pie.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
-            st.plotly_chart(fig_pie, use_container_width=True)
+            bar_df = pd.DataFrame(list(rbc.items())[:8], columns=["Category", "Revenue"]).sort_values("Revenue", ascending=True)
+            fig_bar = px.bar(bar_df, x="Revenue", y="Category", orientation="h",
+                             title=f"Top Categories by Revenue",
+                             template="plotly_dark", color_discrete_sequence=["#3b82f6"])
+            fig_bar.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
+            st.plotly_chart(fig_bar, use_container_width=True)
         else:
-            st.info("Select a category column to see revenue share.")
-    st.markdown("### Dataset Preview")
-    st.dataframe(df.head(10), use_container_width=True)
+            st.info("Select a category column to see category distribution.")
 
 with tabs[1]:
     st.subheader("Performance Trends & Leaderboards")
@@ -353,34 +404,15 @@ with tabs[1]:
     elif sel_date == "None":
         st.info("Select a date column in the sidebar to see trends.")
     else:
-        st.info("Not enough dated data to draw a trend.")
+        st.info("Not enough dated data to draw a chronological trend.")
 
     if facts["revenue_by_category"]:
         gdf = pd.DataFrame(list(facts["revenue_by_category"].items()), columns=["Category", "Revenue"])
-        a, b = st.columns(2)
-        with a:
-            st.markdown("#### Top Categories by Revenue")
-            st.dataframe(gdf.head(10), use_container_width=True)
-        with b:
-            fig_bar = px.bar(gdf.head(10), x="Category", y="Revenue", template="plotly_dark",
-                             title="Top 10 by Revenue")
-            fig_bar.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
-            st.plotly_chart(fig_bar, use_container_width=True)
+        st.markdown("#### Category Leaderboard")
+        st.dataframe(gdf, use_container_width=True)
 
 with tabs[2]:
-    st.subheader("Data Check: Is Your Data Reliable?")
-    d1, d2, d3 = st.columns(3)
-    d1.metric("Data Quality Score", f"{meta['data_health_index']}%")
-    d2.metric("Missing Cells", f"{meta['missing_cells']:,}")
-    d3.metric("Duplicate Rows", f"{meta['duplicate_rows']:,}")
-    if facts["anomalies"]:
-        st.markdown(f"##### Unusually large sales ({meta['anomaly_count']} total, top 5 shown)")
-        st.dataframe(pd.DataFrame(facts["anomalies"]).head(5), use_container_width=True)
-    else:
-        st.success("No significant outliers detected.")
-
-with tabs[3]:
-    st.subheader("What-If Scenario & Sensitivity Modelling")
+    st.subheader("What-If Scenario & Heatmap Sensitivity Modelling")
     st.caption("Volume changes scale variable costs; fixed costs stay flat; price changes affect revenue only.")
 
     sim_totals = dict(totals)
@@ -404,10 +436,10 @@ with tabs[3]:
     res = calculate_scenario(sim_totals, price_adj, volume_adj, fixed_change, var_pct, fixed_share)
     res["cost_assumed"] = cost_assumed
     s1, s2, s3, s4 = st.columns(4)
-    s1.metric("Simulated Revenue", money(res["revenue"], currency),
+    s1.metric("Simulated Revenue", format_compact(res["revenue"], currency),
               f"{((1 + price_adj / 100) * (1 + volume_adj / 100) - 1) * 100:+.1f}%")
-    s2.metric("Simulated Costs", money(res["costs"], currency))
-    s3.metric("Simulated Net Profit", money(res["net_profit"], currency), f"{res['profit_delta']:+,.2f}")
+    s2.metric("Simulated Costs", format_compact(res["costs"], currency))
+    s3.metric("Simulated Net Profit", format_compact(res["net_profit"], currency), f"{res['profit_delta']:+,.2f}")
     s4.metric("Simulated Margin", pct(res["profit_margin"]))
 
     if st.button("💾 Save Scenario", type="primary"):
@@ -419,67 +451,78 @@ with tabs[3]:
         st.markdown("### 📊 Your Saved Scenarios")
         st.dataframe(pd.DataFrame(saved)[["scenario_name", "revenue", "costs", "net_profit", "margin"]],
                      use_container_width=True)
-        if st.button("🗑️ Delete all my saved scenarios"):
+        if st.button("🗑️ Delete all my saved scenarios", help="Clear saved scenarios"):
             delete_scenarios_db(USER)
             st.rerun()
 
     st.markdown("---")
-    st.markdown("### 📈 Profit Sensitivity Matrix")
-    st.dataframe(pd.DataFrame(generate_sensitivity_matrix(sim_totals, fixed_share)), use_container_width=True)
+    st.markdown("### 📈 Profit Sensitivity Heatmap")
+    sens_matrix = generate_sensitivity_matrix(sim_totals, fixed_share)
+    sens_df = pd.DataFrame(sens_matrix)
+    if not sens_df.empty:
+        fig_heat = px.imshow(sens_df.set_index(sens_df.columns[0]),
+                             color_continuous_midpoint=0, text_auto=",.0f",
+                             color_continuous_scale="RdYlGn", template="plotly_dark",
+                             labels=dict(color="Profit"))
+        fig_heat.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
+        st.plotly_chart(fig_heat, use_container_width=True)
 
-with tabs[4]:
-    st.subheader("AI Business Advisor")
-    st.caption("Plain-language advice based only on your own numbers and saved what-if plans.")
-    consent = st.checkbox("I understand that aggregated figures are sent to our AI provider. Raw rows are never sent.")
-    if st.button("Get My AI Business Advice", type="primary", disabled=not consent):
-        with st.spinner("🤖 Analyzing verified facts and your scenarios..."):
-            try:
-                res_ai = requests.post(
-                    f"{BACKEND_URL}/api/ai-advisory",
-                    json={"verified_stats": build_ai_payload(facts), "saved_scenarios": load_scenarios_db(USER)},
-                    headers={"X-API-Key": BACKEND_SECRET_KEY, "X-User-Id": USER},
-                    timeout=120,
-                )
+with tabs[3]:
+    st.subheader("Reports, AI Advisor & History")
+    
+    col_rep1, col_rep2 = st.columns(2)
+    with col_rep1:
+        st.markdown("### 🧠 AI Business Advisor")
+        consent = st.checkbox("I understand aggregated figures are sent to AI. Raw rows are never sent.")
+        if st.button("Get AI CFO Brief", type="primary", disabled=not consent):
+            with st.spinner("🤖 Analyzing verified facts and scenarios..."):
                 try:
-                    body = res_ai.json()
-                except Exception:
-                    body = {"detail": res_ai.text or "Server error."}
-                if res_ai.status_code == 200:
-                    advice_text = body.get("advisory", "")
-                    st.markdown("### 📋 Your Business Advice Report")
-                    st.markdown('<div class="saas-card">', unsafe_allow_html=True)
-                    st.markdown(advice_text)
-                    st.markdown("</div>", unsafe_allow_html=True)
-                    
-                    save_audit_history_db(USER_EMAIL, "Independent SME", uploaded.name, totals, advice_text)
-                else:
-                    st.error(body.get("detail", "AI advisory request failed."))
-            except Exception as e:
-                st.error(f"Connection error: {e}")
+                    res_ai = requests.post(
+                        f"{BACKEND_URL}/api/ai-advisory",
+                        json={
+                            "verified_stats": build_ai_payload(facts),
+                            "saved_scenarios": load_scenarios_db(USER),
+                            "currency": currency
+                        },
+                        headers={"X-API-Key": BACKEND_SECRET_KEY, "X-User-Id": USER},
+                        timeout=120,
+                    )
+                    body = res_ai.json() if res_ai.status_code == 200 else {"detail": res_ai.text}
+                    if res_ai.status_code == 200:
+                        advice_text = body.get("advisory", "")
+                        st.markdown('<div class="saas-card">', unsafe_allow_html=True)
+                        st.markdown(advice_text)
+                        st.markdown("</div>", unsafe_allow_html=True)
+                        save_audit_history_db(USER_EMAIL, "Independent SME", uploaded_name, totals, advice_text)
+                    else:
+                        st.error(body.get("detail", "AI advisory request failed."))
+                except Exception as e:
+                    st.error(f"Connection error: {e}")
 
-with tabs[5]:
-    st.subheader("Strategic Business Report (PowerPoint)")
-    if st.button("Create Business Report (.pptx)", type="primary"):
-        with st.spinner("📊 Building the 12-slide deck..."):
-            try:
-                st.session_state["deck_bytes"] = create_executive_deck(
-                    facts, currency=currency, filename=uploaded.name, scenarios=load_scenarios_db(USER))
-                st.success("✅ Deck generated.")
-            except Exception as e:
-                st.error(f"Error generating presentation: {e}")
-    if "deck_bytes" in st.session_state:
-        st.download_button("📥 Download Business Report (.pptx)", data=st.session_state["deck_bytes"],
-                           file_name="Business_Report.pptx",
-                           mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
-                           type="primary")
+    with col_rep2:
+        st.markdown("### 📈 Bank-Ready Presentation Deck")
+        st.caption("Generate a professional 8-slide executive PowerPoint presentation.")
+        if st.button("Create PowerPoint Report (.pptx)", type="primary"):
+            with st.spinner("📊 Building presentation..."):
+                try:
+                    deck_bytes = create_executive_deck(
+                        facts, currency=currency, filename=uploaded_name, scenarios=load_scenarios_db(USER))
+                    st.session_state["deck_bytes"] = deck_bytes
+                    st.success("✅ Deck generated.")
+                    save_audit_history_db(USER_EMAIL, "Independent SME", uploaded_name, totals, "Generated PowerPoint Deck (.pptx)")
+                except Exception as e:
+                    st.error(f"Error generating presentation: {e}")
+        if "deck_bytes" in st.session_state:
+            st.download_button("📥 Download Business Report (.pptx)", data=st.session_state["deck_bytes"],
+                               file_name="Business_Report.pptx",
+                               mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                               type="primary")
 
-with tabs[6]:
-    st.subheader("📂 Dedicated User History & Saved Audits")
-    st.caption("Review all your past uploaded files, financial summaries, and generated AI briefs linked to your account.")
+    st.markdown("---")
+    st.subheader("📂 Dedicated User History & Audit Trail")
     history_records = load_user_history_db(USER_EMAIL)
     if history_records:
         st.dataframe(pd.DataFrame(history_records)[["file_name", "total_revenue", "net_profit", "profit_margin", "timestamp"]], use_container_width=True)
-        
         with st.expander("🔍 View Saved AI Briefs"):
             for rec in history_records:
                 if rec.get("ai_brief"):
@@ -487,9 +530,9 @@ with tabs[6]:
                     st.markdown(rec["ai_brief"])
                     st.markdown("---")
     else:
-        st.info("No audit history saved yet. Generate an AI CFO Brief to save your state.")
+        st.info("No audit history saved yet.")
 
-with tabs[7]:
+    st.markdown("---")
     st.subheader("Feedback & Support")
     with st.form("feedback_form"):
         cat = st.selectbox("Category", ["Bug Report", "Feature Request", "General Feedback"])

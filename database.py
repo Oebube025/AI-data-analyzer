@@ -1,7 +1,7 @@
 """
 Persistent storage (database.py): user accounts, saved What-If scenarios,
 tenant activity logs, user audit history, and feedback in DuckDB.
-Contains automatic schema migration and ZERO Streamlit imports.
+Contains automatic schema migration, scenario cost_assumed parsing, and ZERO Streamlit imports.
 """
 
 import contextlib
@@ -214,8 +214,24 @@ def load_scenarios_db(user_id: str) -> list:
             ).fetchdf()
     except Exception:
         return []
-    df = df.astype(object).where(df.notna(), None)
-    return df.to_dict(orient="records")
+    
+    results = []
+    for _, row in df.iterrows():
+        details = {}
+        if row["details"]:
+            try:
+                details = json.loads(row["details"])
+            except Exception:
+                pass
+        results.append({
+            "scenario_name": row["scenario_name"],
+            "revenue": row["revenue"],
+            "costs": row["costs"],
+            "net_profit": row["net_profit"],
+            "margin": row["margin"],
+            "cost_assumed": details.get("cost_assumed", False)
+        })
+    return results
 
 
 def delete_scenarios_db(user_id: str):

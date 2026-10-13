@@ -1,6 +1,6 @@
 """
 FastAPI Backend (main.py) - Executive Intelligence Suite
-Upgraded to Cohere command-a-03-2025, strict API key enforcement, and rate limiting.
+Restores payload size checks, number filtering, outlier summaries, currency, and Cohere command-a-03-2025.
 """
 
 import hmac
@@ -16,7 +16,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 
-APP_VERSION = "1.6"
+APP_VERSION = "1.7"
 app = FastAPI(title="Executive Intelligence Backend", version=APP_VERSION)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("uvicorn")
@@ -28,6 +28,7 @@ MAX_BODY_CHARS = 200_000
 class AIAdvisoryRequest(BaseModel):
     verified_stats: dict
     saved_scenarios: Optional[list] = None
+    currency: Optional[str] = "₦"
 
 
 def require_key(x_api_key: str = Header(None)):
@@ -60,6 +61,10 @@ def check_rate_limit(user: str):
     _global_hits.append(now)
 
 
+def _num(v):
+    return v if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+
+
 def sanitize_stats(stats: dict) -> dict:
     meta = stats.get("metadata") or {}
     return {
@@ -71,6 +76,8 @@ def sanitize_stats(stats: dict) -> dict:
         "leaderboards": stats.get("leaderboards"),
         "concentration": stats.get("concentration"),
         "trend": stats.get("trend"),
+        "anomaly_summary": stats.get("anomaly_summary"),
+        "anomalies": stats.get("anomalies", [])[:5],  # Restored outlier values
         "warnings": [str(w)[:300] for w in (stats.get("warnings") or [])[:10]],
     }
 
@@ -81,15 +88,19 @@ def sanitize_scenarios(scenarios: Optional[list]) -> list:
         if isinstance(sc, dict):
             out.append({
                 "scenario_name": str(sc.get("scenario_name", ""))[:80],
-                "revenue": sc.get("revenue"), "costs": sc.get("costs"),
-                "net_profit": sc.get("net_profit"), "margin": sc.get("margin"),
+                "revenue": _num(sc.get("revenue")),
+                "costs": _num(sc.get("costs")),
+                "net_profit": _num(sc.get("net_profit")),
+                "margin": _num(sc.get("margin")),
+                "cost_assumed": bool(sc.get("cost_assumed", False)),  # Restored cost assumed flag
             })
     return out
 
 
-def build_prompt(stats: dict, scenarios: list) -> str:
+def build_prompt(stats: dict, scenarios: list, currency: str) -> str:
     return f"""You are a friendly, practical business advisor writing for a small business owner with no finance background.
 Write in plain, simple English with short sentences. Avoid jargon.
+All monetary figures use the currency symbol: {currency}.
 Analyze ONLY the data inside the <data> tags. Do NOT invent numbers.
 
 <data>
@@ -103,7 +114,7 @@ SAVED WHAT-IF SCENARIOS:
 Write the report in exactly these 6 markdown sections:
 1. HOW THE BUSINESS IS DOING (money in, money spent, profit, margin)
 2. WHAT SELLS BEST AND WHAT DOESN'T (top and weakest products or categories)
-3. IS YOUR RECORD-KEEPING RELIABLE? (missing data, duplicates, unusually large sales)
+3. IS YOUR RECORD-KEEPING RELIABLE? (missing data, duplicates, unusually large sales / outliers)
 4. THINGS TO WATCH OUT FOR (thin profit, relying on one product, other risks)
 5. TRENDS AND YOUR WHAT-IF PLANS (how sales change over time and what the saved plans mean)
 6. WHAT TO DO IN THE NEXT 30 / 60 / 90 DAYS (simple, practical steps tied to the numbers)
@@ -123,12 +134,16 @@ async def health_check():
 
 @app.post("/api/ai-advisory", dependencies=[Depends(require_key)])
 async def generate_ai_advisory(payload: AIAdvisoryRequest, x_user_id: str = Header("anonymous")):
+    body_str = json.dumps(payload.model_dump(), default=str)
+    if len(body_str) > MAX_BODY_CHARS:  # Restored strict payload size limit
+        raise HTTPException(status_code=413, detail="Payload too large.")
+
     api_key = os.getenv("COHERE_API_KEY")
     if not api_key:
         raise HTTPException(status_code=503, detail="AI service configuration missing.")
 
     check_rate_limit(x_user_id[:64])
-    prompt = build_prompt(sanitize_stats(payload.verified_stats), sanitize_scenarios(payload.saved_scenarios))
+    prompt = build_prompt(sanitize_stats(payload.verified_stats), sanitize_scenarios(payload.saved_scenarios), payload.currency or "₦")
     try:
         text = await run_in_threadpool(_call_cohere, api_key, prompt)
         return {"advisory": text}
