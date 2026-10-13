@@ -1,6 +1,6 @@
 """
 FastAPI Backend (main.py) - Executive Intelligence Suite
-Restores payload size checks, number filtering, outlier summaries, currency, and Cohere command-a-03-2025.
+Synchronized to v2.1 with Cohere command-a-03-2025 and strict payload limits.
 """
 
 import hmac
@@ -16,7 +16,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 
-APP_VERSION = "1.7"
+APP_VERSION = "2.1"
 app = FastAPI(title="Executive Intelligence Backend", version=APP_VERSION)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("uvicorn")
@@ -77,7 +77,7 @@ def sanitize_stats(stats: dict) -> dict:
         "concentration": stats.get("concentration"),
         "trend": stats.get("trend"),
         "anomaly_summary": stats.get("anomaly_summary"),
-        "anomalies": stats.get("anomalies", [])[:5],  # Restored outlier values
+        "anomalies": stats.get("anomalies", [])[:5],
         "warnings": [str(w)[:300] for w in (stats.get("warnings") or [])[:10]],
     }
 
@@ -92,7 +92,7 @@ def sanitize_scenarios(scenarios: Optional[list]) -> list:
                 "costs": _num(sc.get("costs")),
                 "net_profit": _num(sc.get("net_profit")),
                 "margin": _num(sc.get("margin")),
-                "cost_assumed": bool(sc.get("cost_assumed", False)),  # Restored cost assumed flag
+                "cost_assumed": bool(sc.get("cost_assumed", False)),
             })
     return out
 
@@ -135,12 +135,12 @@ async def health_check():
 @app.post("/api/ai-advisory", dependencies=[Depends(require_key)])
 async def generate_ai_advisory(payload: AIAdvisoryRequest, x_user_id: str = Header("anonymous")):
     body_str = json.dumps(payload.model_dump(), default=str)
-    if len(body_str) > MAX_BODY_CHARS:  # Restored strict payload size limit
-        raise HTTPException(status_code=413, detail="Payload too large.")
+    if len(body_str) > MAX_BODY_CHARS:
+        raise HTTPException(status_code=413, detail="Payload too large. Please upload a smaller subset of records.")
 
     api_key = os.getenv("COHERE_API_KEY")
     if not api_key:
-        raise HTTPException(status_code=503, detail="AI service configuration missing.")
+        raise HTTPException(status_code=503, detail="AI service configuration missing on server.")
 
     check_rate_limit(x_user_id[:64])
     prompt = build_prompt(sanitize_stats(payload.verified_stats), sanitize_scenarios(payload.saved_scenarios), payload.currency or "₦")
@@ -149,4 +149,4 @@ async def generate_ai_advisory(payload: AIAdvisoryRequest, x_user_id: str = Head
         return {"advisory": text}
     except Exception as e:
         logger.error("Cohere AI error: %s", e)
-        raise HTTPException(status_code=502, detail="The AI provider request failed. Please try again.")
+        raise HTTPException(status_code=502, detail="The AI provider encountered an error. Please try again shortly.")

@@ -1,7 +1,7 @@
 """
 Dataset Analysis & Preparation (analysis.py)
-Robust number parsing, precise total row filtering, accurate column heuristics,
-deck insight generation, and cached dataset preparation.
+Advanced column heuristics, true concentration calculation, 
+robust numeric parsing, and accurate profit/loss detection.
 """
 
 import re
@@ -10,7 +10,6 @@ import numpy as np
 
 
 def parse_numeric_series(series: pd.Series) -> pd.Series:
-    """Safely converts currency/formatted text (e.g. '₦1,200', '(500)') into numeric values."""
     if pd.api.types.is_numeric_dtype(series):
         return pd.to_numeric(series, errors="coerce").fillna(0.0)
     
@@ -35,30 +34,22 @@ def parse_numeric_series(series: pd.Series) -> pd.Series:
 
 
 def prepare_dataframe(df: pd.DataFrame):
-    """
-    Cleans data, excludes exact total/summary rows across all columns,
-    and parses dates with dayfirst=True when >= 80% valid.
-    """
     clean = df.copy()
     notes = []
-    
     clean.columns = [str(c).strip() for c in clean.columns]
     
-    # Precise Summary / Total Row Filter (exact label match across any string column)
     total_mask = pd.Series(False, index=clean.index)
     for col in clean.columns:
         if pd.api.types.is_string_dtype(clean[col]) or clean[col].dtype == object:
             col_str = clean[col].astype(str).str.strip().str.lower()
-            # Match exact terms like "total", "subtotal", "grand total", "summary"
             mask = col_str.str.contains(r"^(total|subtotal|grand total|sum|overall total|summary)$", na=False, regex=True)
             total_mask = total_mask | mask
 
     if total_mask.any():
         dropped_count = int(total_mask.sum())
         clean = clean[~total_mask].reset_index(drop=True)
-        notes.append(f"Excluded {dropped_count} summary/total row(s) to avoid double counting.")
+        notes.append(f"Excluded {dropped_count} summary/total row(s).")
 
-    # 80% Threshold Date Parsing
     for col in clean.columns:
         cl = col.lower()
         if any(w in cl for w in ["date", "time", "created"]) and not any(w in cl for w in ["period", "day", "month", "qty"]):
@@ -75,15 +66,16 @@ def prepare_dataframe(df: pd.DataFrame):
 
 
 def valid_numeric_columns(df: pd.DataFrame) -> list:
-    """Identifies valid numeric columns, avoiding identifier tokens like ID, ZIP, or Phone."""
     numeric_cols = []
     for c in df.columns:
         cl = c.lower()
-        # Word boundary matching for IDs to avoid dropping 'Amount Paid'
-        if re.search(r"\b(id|code|phone|zip|postal|year)\b", cl):
+        # Exclude IDs, snake_case IDs, and alphanumeric strings like product names with numbers ("Peak Milk 400g")
+        if re.search(r"\b(id|code|phone|zip|postal|year|sku)\b", cl) or "_" in cl:
             continue
+        # Check if the column is predominantly numeric text rather than product descriptions
         parsed = parse_numeric_series(df[c])
-        if parsed.notna().sum() > 0 and not pd.api.types.is_datetime64_any_dtype(df[c]):
+        valid_count = parsed.notna().sum()
+        if valid_count > 0 and (valid_count / max(1, len(df))) > 0.5:
             numeric_cols.append(c)
     return numeric_cols
 
@@ -92,10 +84,10 @@ def suggest_columns(df: pd.DataFrame) -> dict:
     sug = {"revenue": None, "cost": None, "category": None, "date": None}
     nums = valid_numeric_columns(df)
     
-    # Priority matching for revenue/sales headers
+    # Priority for revenue: look for sales/revenue/amount headers first, avoiding cost/qty columns
     for c in nums:
         cl = c.lower()
-        if any(w in cl for w in ["amount", "revenue", "sales", "total", "turnover", "income"]):
+        if any(w in cl for w in ["revenue", "sales", "turnover", "amount", "total", "income"]) and "cost" not in cl and "qty" not in cl:
             sug["revenue"] = c
             break
             
@@ -104,13 +96,13 @@ def suggest_columns(df: pd.DataFrame) -> dict:
         
     for c in nums:
         cl = c.lower()
-        if any(w in cl for w in ["cost", "expense", "cogs", "spend", "purchase"]) and c != sug["revenue"]:
+        if any(w in cl for w in ["cost", "expense", "cogs", "spend"]) and c != sug["revenue"]:
             sug["cost"] = c
             break
             
     for c in df.columns:
         cl = c.lower()
-        if c not in nums and any(w in cl for w in ["product", "category", "item", "description", "region", "branch", "client"]):
+        if c not in nums and any(w in cl for w in ["product", "category", "item", "description", "region", "branch", "client", "name"]):
             sug["category"] = c
             break
             
@@ -124,10 +116,6 @@ def suggest_columns(df: pd.DataFrame) -> dict:
 
 
 def derive_insights(facts_or_df, revenue_col: str = None, cost_col: str = None, category_col: str = None) -> dict:
-    """
-    Generates structured insights compatible with deck_builder requirements.
-    Supports flexible calls from both analysis functions and deck_builder.
-    """
     if isinstance(facts_or_df, dict):
         facts = facts_or_df
         rbc = facts.get("revenue_by_category", {})
@@ -135,12 +123,24 @@ def derive_insights(facts_or_df, revenue_col: str = None, cost_col: str = None, 
         top_items = [(str(k), float(v)) for k, v in list(rbc.items())[:5]]
         top_category = top_items[0][0] if top_items else "N/A"
         
+        total_rev = totals.get("total_revenue", 1.0)
+        top_rev = top_items[0][1] if top_items else 0.0
+        share_pct = (top_rev / total_rev * 100) if total_rev > 0 else 0.0
+        
+        concentration_label = "Low"
+        if share_pct > 50:
+            concentration_label = f"High ({share_pct:.1f}% concentrated in {top_category})"
+        elif share_pct > 30:
+            concentration_label = f"Moderate ({share_pct:.1f}% in {top_category})"
+        else:
+            concentration_label = f"Low ({share_pct:.1f}% in {top_category})"
+
         return {
             "top_items": top_items,
             "top_category": top_category,
             "leaderboards": {"top_categories": rbc},
-            "concentration": {"top_category": top_category, "share": "Moderate"},
-            "highlights": [f"Total revenue reached {totals.get('total_revenue', 0):,.2f}"],
+            "concentration": {"top_category": top_category, "share": concentration_label},
+            "highlights": [f"Top category '{top_category}' accounts for {share_pct:.1f}% of revenue."],
             "risks": facts.get("warnings", []),
         }
 
@@ -148,18 +148,30 @@ def derive_insights(facts_or_df, revenue_col: str = None, cost_col: str = None, 
     rbc = {}
     top_items = []
     top_category = "N/A"
+    share_pct = 0.0
     
     if category_col and category_col != "None" and category_col in df.columns and revenue_col in df.columns:
         grouped = df.groupby(category_col)[revenue_col].sum().sort_values(ascending=False)
         rbc = {str(k): float(v) for k, v in grouped.items()}
+        total_rev = float(grouped.sum())
         top_items = [(str(k), float(v)) for k, v in grouped.head(5).items()]
-        top_category = top_items[0][0] if top_items else "N/A"
+        if top_items:
+            top_category = top_items[0][0]
+            share_pct = (top_items[0][1] / total_rev * 100) if total_rev > 0 else 0.0
+
+    concentration_label = "Moderate"
+    if share_pct > 50:
+        concentration_label = f"High ({share_pct:.1f}% in {top_category})"
+    elif share_pct > 30:
+        concentration_label = f"Moderate ({share_pct:.1f}% in {top_category})"
+    else:
+        concentration_label = f"Low ({share_pct:.1f}% in {top_category})"
 
     return {
         "top_items": top_items,
         "top_category": top_category,
         "leaderboards": {"top_categories": rbc},
-        "concentration": {"top_category": top_category, "share": "Moderate"},
+        "concentration": {"top_category": top_category, "share": concentration_label},
         "highlights": [f"Category '{top_category}' is the leading revenue driver."],
         "risks": [],
     }
@@ -170,7 +182,6 @@ def analyze_dataset(df: pd.DataFrame, revenue_col: str, cost_col: str = "None",
     work = df.copy()
     rev_series = parse_numeric_series(work[revenue_col]).fillna(0.0)
     
-    # Only calculate Qty * Price if selected revenue column is strictly 'unit price' / 'price'
     if "price" in revenue_col.lower() and "total" not in revenue_col.lower() and "amount" not in revenue_col.lower():
         for c in work.columns:
             if c != revenue_col and any(w in c.lower() for w in ["qty", "quantity", "units"]):
@@ -220,7 +231,6 @@ def analyze_dataset(df: pd.DataFrame, revenue_col: str, cost_col: str = "None",
                 if vals[-2] > 0:
                     trend["change_pct"] = float((vals[-1] - vals[-2]) / vals[-2] * 100)
                 
-    # Anomaly Detection (privacy-safe numeric values)
     anomalies = []
     mean_val = rev_series.mean()
     std_val = rev_series.std()

@@ -1,7 +1,7 @@
 """
 Executive Data Intelligence Suite - Streamlit Frontend (App1.py)
-Dark Glassmorphism & Claymorphism UI, 4-Tab Layout, Sample Data Loader, 
-Heatmap Sensitivity Matrix, and Secured Admin Portal.
+Synchronized to v2.1 with clean splash screen messaging, user-friendly error formatting,
+retail sample data, and secure audit history.
 """
 
 import hashlib
@@ -25,9 +25,9 @@ from database import (init_db, load_scenarios_db, save_scenario_db, delete_scena
 from deck_builder import create_executive_deck
 from simulator import calculate_scenario, generate_sensitivity_matrix
 
-APP_VERSION = "2.0"
+APP_VERSION = "2.1"
 
-st.set_page_config(page_title="AI CFO Suite | Pilot Beta", page_icon="📊",
+st.set_page_config(page_title="Executive Intelligence Suite | Pilot Beta", page_icon="📊",
                    layout="wide", initial_sidebar_state="expanded")
 
 # --- SIGNATURE DARK GLASSMORPHISM & CLAYMORPHISM STYLING ---
@@ -47,12 +47,6 @@ st.markdown("""
     }
     div[data-testid="stMetric"] label { color: #94a3b8 !important; font-weight: 500; font-size: 0.85rem !important; text-transform: uppercase; }
     div[data-testid="stMetric"] [data-testid="stMetricValue"] { color: #f8fafc !important; font-weight: 700; }
-    .verdict-banner {
-        background: linear-gradient(135deg, rgba(37, 99, 235, 0.2) 0%, rgba(15, 23, 42, 0.8) 100%);
-        border: 1px solid rgba(59, 130, 246, 0.4); padding: 20px 24px; border-radius: 14px;
-        font-size: 1.15rem; font-weight: 600; color: #f8fafc; margin-bottom: 24px;
-        box-shadow: 0 8px 24px rgba(0,0,0,0.4);
-    }
     .beta-badge { 
         background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%); color: #ffffff; 
         font-size: 0.7rem; font-weight: 700; padding: 4px 10px; border-radius: 20px; margin-left: 8px; text-transform: uppercase; 
@@ -135,13 +129,14 @@ def idx(options, value):
     return options.index(value) if value in options else 0
 
 
-# --- SAMPLE DATA GENERATOR ---
 def get_sample_dataframe() -> pd.DataFrame:
     data = {
-        "Order_Date": ["01/08/2026", "10/08/2026", "15/08/2026", "02/09/2026", "14/09/2026", "25/09/2026", "05/10/2026", "12/10/2026"],
-        "Product_Category": ["SaaS Subscription", "Enterprise Tier", "Consulting", "SaaS Subscription", "Add-on Module", "Enterprise Tier", "Consulting", "SaaS Subscription"],
-        "Revenue_NGN": [450000, 1200000, 350000, 480000, 150000, 1350000, 400000, 500000],
-        "Cost_NGN": [120000, 300000, 100000, 130000, 40000, 320000, 110000, 135000]
+        "Date": ["01/08/2026", "05/08/2026", "10/08/2026", "15/08/2026", "01/09/2026", "10/09/2026", "20/09/2026", "05/10/2026"],
+        "Product": ["Rice (50kg)", "Peak Milk 400g", "Vegetable Oil (25L)", "Frozen Chicken", "Rice (50kg)", "Vegetable Oil (25L)", "Peak Milk 400g", "Frozen Chicken"],
+        "Quantity": [10, 50, 8, 15, 12, 10, 60, 20],
+        "Unit_Price": [45000, 3500, 32000, 5500, 46000, 32500, 3500, 5500],
+        "Total_Amount": [450000, 175000, 256000, 82500, 552000, 325000, 210000, 110000],
+        "Total_Cost": [380000, 130000, 200000, 65000, 450000, 250000, 150000, 85000]
     }
     return pd.DataFrame(data)
 
@@ -155,15 +150,15 @@ if not st.session_state.get("user"):
         _, col, _ = st.columns([1, 2.5, 1])
         with col:
             st.markdown("<br><br>", unsafe_allow_html=True)
-            st.markdown("<h1 style='text-align:center;'>💼 AI CFO Suite <span class='beta-badge'>PILOT v2.0</span></h1>", unsafe_allow_html=True)
+            st.markdown("<h1 style='text-align:center;'>💼 Executive Intelligence Suite <span class='beta-badge'>PILOT v2.1</span></h1>", unsafe_allow_html=True)
             st.markdown("<p style='text-align:center;color:#94a3b8;font-size:1.1rem;margin-bottom:30px;'>"
-                        "Transform business transaction exports into bank-ready financial reports, "
-                        "growth scenarios, and automated CFO briefs in 60 seconds.</p>", unsafe_allow_html=True)
+                        "Transform business transaction exports into structured financial reports, "
+                        "growth scenarios, and automated advisory briefs.</p>", unsafe_allow_html=True)
             
             c1, c2, c3 = st.columns(3)
-            c1.metric("Audit Speed", "Instant", "Automated")
-            c2.metric("Reporting", "12-Slide", "Bank-Ready")
-            c3.metric("Insights", "CFO AI", "On-Demand")
+            c1.metric("Audit Speed", "Fast", "Automated")
+            c2.metric("Reporting", "8-Slide", "Presentation-Ready")
+            c3.metric("Insights", "AI Advisory", "On-Demand")
             
             st.markdown("<br>", unsafe_allow_html=True)
             if st.button("🚀 Get Started / Enter Workspace", type="primary"):
@@ -234,11 +229,11 @@ if uploaded is None:
             sample_df = get_sample_dataframe()
             csv_bytes = sample_df.to_csv(index=False).encode("utf-8")
             st.session_state["sample_upload_bytes"] = csv_bytes
-            st.session_state["sample_filename"] = "sample_business_records.csv"
+            st.session_state["sample_filename"] = "retail_store_records.csv"
             st.rerun()
     with col_b:
         sample_df_dl = get_sample_dataframe()
-        st.download_button("📥 Download Sample CSV Template", data=sample_df_dl.to_csv(index=False), file_name="template_business_records.csv", mime="text/csv")
+        st.download_button("📥 Download Sample CSV Template", data=sample_df_dl.to_csv(index=False), file_name="retail_template.csv", mime="text/csv")
 
     if "sample_upload_bytes" in st.session_state:
         uploaded_data = st.session_state["sample_upload_bytes"]
@@ -284,7 +279,8 @@ if st.session_state.get("data_key") != data_key:
     st.session_state.update(data_key=data_key, active_df=clean, prep_notes=notes,
                             suggested=suggest_columns(clean))
     st.session_state.pop("deck_bytes", None)
-    log_tenant_activity(USER_EMAIL, f"Uploaded File: {uploaded_name}", increment_upload=True)
+    if uploaded is not None:
+        log_tenant_activity(USER_EMAIL, f"Uploaded File: {uploaded_name}", increment_upload=True)
 
 df = st.session_state["active_df"]
 notes = st.session_state["prep_notes"]
@@ -336,29 +332,33 @@ if is_admin:
                 st.info("No tenant data recorded yet.")
             conn.close()
 
-# --- STREAMLINED 4-TAB NAVIGATION ---
-tabs = st.tabs(["📊 Summary", "📈 Trends", "🎛️ What-If", "📁 Reports & History"])
+# --- STREAMLINED NAVIGATION ---
+tabs = st.tabs(["📊 Summary", "📈 Trends", "🔍 Data Check", "🎛️ What-If", "📁 Reports & History"])
 
 with tabs[0]:
     st.subheader("Executive Summary")
     
-    # --- ONE-LINE VERDICT BANNER ---
-    profit_val = totals["net_profit"] if cost_known else 0.0
+    profit_val = totals["net_profit"] if cost_known and totals["net_profit"] is not None else 0.0
     margin_val = totals["profit_margin"]
     if cost_known:
-        verdict_text = f"✨ **Verdict:** You generated **{format_compact(totals['total_revenue'], currency)}** in revenue with **{format_compact(profit_val, currency)}** net profit ({pct(margin_val)} margin). Financial health is stable."
+        if profit_val > 0:
+            verdict_msg = f"You generated **{format_compact(totals['total_revenue'], currency)}** in revenue with **{format_compact(profit_val, currency)}** net profit ({pct(margin_val)} margin). Financial health is stable and profitable."
+        elif profit_val < 0:
+            verdict_msg = f"Warning: You generated **{format_compact(totals['total_revenue'], currency)}** in revenue but incurred a net loss of **{format_compact(abs(profit_val), currency)}**. Immediate cost rationalization is advised."
+        else:
+            verdict_msg = f"You generated **{format_compact(totals['total_revenue'], currency)}** in revenue and broke even. Review cost structures to improve margins."
     else:
-        verdict_text = f"✨ **Verdict:** You generated **{format_compact(totals['total_revenue'], currency)}** in revenue. Select a cost column to evaluate net profitability."
-    st.markdown(f'<div class="verdict-banner">{verdict_text}</div>', unsafe_allow_html=True)
+        verdict_msg = f"You generated **{format_compact(totals['total_revenue'], currency)}** in revenue. Select a cost column to evaluate net profitability."
+    
+    st.markdown(f"✨ **Verdict:** {verdict_msg}")
 
-    if notes:
-        with st.expander("ℹ️ What we did to your file (Data Prep & Cleaning)"):
+    if notes or facts["warnings"]:
+        with st.expander("ℹ️ What we did to your file (Data Prep & Warnings)"):
             for n in notes:
                 st.markdown(f"- {n}")
             for w in facts["warnings"]:
                 st.markdown(f"⚠️ {w}")
 
-    # --- PROMINENT METRIC BLOCKS ---
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Net Profit", format_compact(totals["net_profit"], currency) if cost_known else "n/a")
     c2.metric("Total Revenue", format_compact(totals["total_revenue"], currency))
@@ -393,7 +393,7 @@ with tabs[0]:
 
 with tabs[1]:
     st.subheader("Performance Trends & Leaderboards")
-    if len(trend["points"]) >= 2:
+    if len(trend["points"]) >= 1:
         tdf = pd.DataFrame(trend["points"])
         fig_trend = px.line(tdf, x="period", y="revenue", markers=True, template="plotly_dark",
                             title=f"Revenue by {trend['granularity']} (chronological)")
@@ -412,6 +412,20 @@ with tabs[1]:
         st.dataframe(gdf, use_container_width=True)
 
 with tabs[2]:
+    st.subheader("Data Check: Is Your Data Reliable?")
+    d1, d2, d3 = st.columns(3)
+    d1.metric("Data Quality Score", f"{meta['data_health_index']}%")
+    d2.metric("Missing Cells", f"{meta['missing_cells']:,}")
+    d3.metric("Duplicate Rows", f"{meta['duplicate_rows']:,}")
+    if facts["anomalies"]:
+        st.markdown(f"##### Unusually large sales ({meta['anomaly_count']} total, top 5 shown)")
+        st.dataframe(pd.DataFrame(facts["anomalies"]).head(5), use_container_width=True)
+    else:
+        st.success("No significant outliers detected.")
+    st.markdown("### Dataset Preview")
+    st.dataframe(df.head(10), use_container_width=True)
+
+with tabs[3]:
     st.subheader("What-If Scenario & Heatmap Sensitivity Modelling")
     st.caption("Volume changes scale variable costs; fixed costs stay flat; price changes affect revenue only.")
 
@@ -467,7 +481,7 @@ with tabs[2]:
         fig_heat.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
         st.plotly_chart(fig_heat, use_container_width=True)
 
-with tabs[3]:
+with tabs[4]:
     st.subheader("Reports, AI Advisor & History")
     
     col_rep1, col_rep2 = st.columns(2)
@@ -487,15 +501,17 @@ with tabs[3]:
                         headers={"X-API-Key": BACKEND_SECRET_KEY, "X-User-Id": USER},
                         timeout=120,
                     )
-                    body = res_ai.json() if res_ai.status_code == 200 else {"detail": res_ai.text}
                     if res_ai.status_code == 200:
+                        body = res_ai.json()
                         advice_text = body.get("advisory", "")
-                        st.markdown('<div class="saas-card">', unsafe_allow_html=True)
                         st.markdown(advice_text)
-                        st.markdown("</div>", unsafe_allow_html=True)
                         save_audit_history_db(USER_EMAIL, "Independent SME", uploaded_name, totals, advice_text)
                     else:
-                        st.error(body.get("detail", "AI advisory request failed."))
+                        try:
+                            err_detail = res_ai.json().get("detail", "The server encountered an error.")
+                        except Exception:
+                            err_detail = res_ai.text or "The server encountered an error."
+                        st.error(f"⚠️ AI Advisory Error: {err_detail}")
                 except Exception as e:
                     st.error(f"Connection error: {e}")
 
