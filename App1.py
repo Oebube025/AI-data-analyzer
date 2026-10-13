@@ -1,14 +1,12 @@
 """
 Executive Data Intelligence Suite - Streamlit Frontend (App1.py)
-Modern Dark Glassmorphism & Claymorphism UI, Frictionless SME Login, 
-Automated CFO Briefs, Bank-Ready Decks, and Founder Admin Panel.
+Modern Dark Glassmorphism & Claymorphism UI, Splash Screen, Secure Auth, 
+Dedicated User History State, and Secured Founder Admin Panel.
 """
 
 import hashlib
-import hmac
 import io
 import os
-import re
 import time
 import duckdb
 
@@ -20,110 +18,44 @@ import streamlit as st
 
 from analysis import (analyze_dataset, build_ai_payload, prepare_dataframe, suggest_columns,
                       valid_numeric_columns)
-from database import (init_db, load_scenarios_db,
-                      save_scenario_db, log_tenant_activity, save_feedback_db)
+from database import (init_db, load_scenarios_db, save_scenario_db, 
+                      log_tenant_activity, save_feedback_db, 
+                      save_audit_history_db, load_user_history_db)
 from deck_builder import create_executive_deck
 from simulator import calculate_scenario, generate_sensitivity_matrix
 
-APP_VERSION = "1.1"
+APP_VERSION = "1.2"
 
 st.set_page_config(page_title="AI CFO Suite for Small Business", page_icon="💼",
                    layout="wide", initial_sidebar_state="expanded")
 
-# --- MODERN DARK, GLASSMORPHISM & CLAYMORPHISM STYLING ---
+# --- MODERN DARK GLASSMORPHISM & CLAYMORPHISM STYLING ---
 st.markdown("""
 <style>
-    /* Global Deep Dark Blue Background */
-    .stApp { 
-        background-color: #0b0f19; 
-        color: #f1f5f9; 
-        font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-    }
-    
-    /* Sidebar Styling */
-    section[data-testid="stSidebar"] { 
-        background-color: #050811; 
-        border-right: 1px solid rgba(30, 41, 59, 0.6); 
-    }
-    
-    /* Glassmorphism Main SaaS Cards */
+    .stApp { background-color: #0b0f19; color: #f1f5f9; font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; }
+    section[data-testid="stSidebar"] { background-color: #050811; border-right: 1px solid rgba(30, 41, 59, 0.6); }
     .saas-card { 
         background: linear-gradient(135deg, rgba(30, 41, 59, 0.65) 0%, rgba(15, 23, 42, 0.85) 100%); 
-        border: 1px solid rgba(51, 65, 85, 0.5); 
-        backdrop-filter: blur(16px);
-        padding: 28px; 
-        border-radius: 18px; 
-        box-shadow: 0 12px 32px -4px rgba(0, 0, 0, 0.6); 
-        margin-bottom: 24px; 
+        border: 1px solid rgba(51, 65, 85, 0.5); backdrop-filter: blur(16px);
+        padding: 28px; border-radius: 18px; box-shadow: 0 12px 32px -4px rgba(0, 0, 0, 0.6); margin-bottom: 24px; 
     }
-    
-    /* Claymorphism 3D Tactile KPI Metric Cards */
     div[data-testid="stMetric"] {
         background: linear-gradient(145deg, #162032, #101726);
-        border: 1px solid rgba(71, 85, 105, 0.4);
-        padding: 20px;
-        border-radius: 16px;
-        box-shadow: inset 0 2px 4px rgba(255, 255, 255, 0.05), 
-                    0 12px 28px rgba(0, 0, 0, 0.5);
-        transition: transform 0.2s ease;
+        border: 1px solid rgba(71, 85, 105, 0.4); padding: 20px; border-radius: 16px;
+        box-shadow: inset 0 2px 4px rgba(255, 255, 255, 0.05), 0 12px 28px rgba(0, 0, 0, 0.5);
     }
-    div[data-testid="stMetric"]:hover {
-        transform: translateY(-2px);
-        border-color: rgba(59, 130, 246, 0.4);
-    }
-    div[data-testid="stMetric"] label {
-        color: #94a3b8 !important;
-        font-weight: 500;
-        font-size: 0.85rem !important;
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-    }
-    div[data-testid="stMetric"] [data-testid="stMetricValue"] {
-        color: #f8fafc !important;
-        font-weight: 700;
-    }
-
-    /* SME Badge */
+    div[data-testid="stMetric"] label { color: #94a3b8 !important; font-weight: 500; font-size: 0.85rem !important; text-transform: uppercase; }
+    div[data-testid="stMetric"] [data-testid="stMetricValue"] { color: #f8fafc !important; font-weight: 700; }
     .sme-badge { 
-        background: linear-gradient(135deg, #10b981 0%, #059669 100%); 
-        color: #ffffff; 
-        font-size: 0.7rem; 
-        font-weight: 700; 
-        padding: 4px 10px; 
-        border-radius: 20px; 
-        vertical-align: middle; 
-        margin-left: 8px; 
-        letter-spacing: 0.05em;
-        text-transform: uppercase;
-        box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
+        background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: #ffffff; 
+        font-size: 0.7rem; font-weight: 700; padding: 4px 10px; border-radius: 20px; margin-left: 8px; text-transform: uppercase; 
     }
-    
-    /* Typography Headers */
-    h1, h2, h3 { 
-        color: #f8fafc; 
-        letter-spacing: -0.03em; 
-        font-weight: 700;
-    }
-    
-    /* Primary Action Buttons (Clay/Glow) */
+    h1, h2, h3 { color: #f8fafc; letter-spacing: -0.03em; font-weight: 700; }
     .stButton>button { 
-        background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%); 
-        color: white; 
-        border: none; 
-        border-radius: 12px; 
-        font-weight: 600; 
-        padding: 0.6rem 1.2rem; 
-        width: 100%; 
-        transition: all 0.25s ease;
-        box-shadow: inset 0 2px 4px rgba(255, 255, 255, 0.2), 
-                    0 6px 16px rgba(37, 99, 235, 0.4);
+        background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%); color: white; border: none; border-radius: 12px; 
+        font-weight: 600; padding: 0.6rem 1.2rem; width: 100%; box-shadow: inset 0 2px 4px rgba(255, 255, 255, 0.2), 0 6px 16px rgba(37, 99, 235, 0.4);
     }
-    .stButton>button:hover { 
-        background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%); 
-        box-shadow: inset 0 2px 4px rgba(255, 255, 255, 0.3), 
-                    0 8px 22px rgba(37, 99, 235, 0.6); 
-        transform: translateY(-1px);
-    }
+    .stButton>button:hover { background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%); transform: translateY(-1px); }
 </style>
 """, unsafe_allow_html=True)
 
@@ -136,7 +68,9 @@ def secret(name: str, default: str = "") -> str:
 
 
 BACKEND_URL = secret("BACKEND_URL", "http://127.0.0.1:8000")
-BACKEND_SECRET_KEY = secret("BACKEND_SECRET_KEY")
+BACKEND_SECRET_KEY = secret("BACKEND_SECRET_KEY", "secure-default-key-2026")
+ADMIN_PASSWORD = secret("ADMIN_PASSWORD", "Caleb@2020")
+BETA_PASSCODE = secret("BETA_PASSCODE", "demo-beta-2026")
 DB_FILE = secret("DB_PATH", "executive_intelligence.duckdb")
 
 
@@ -164,9 +98,7 @@ def get_facts(df: pd.DataFrame, rev, cost, cat, date, notes: tuple):
 
 
 def read_upload(name: str, data: bytes, sheet=None) -> pd.DataFrame:
-    """Robust Excel and CSV file reader fixing parsing errors."""
     if name.lower().endswith(".xlsx"):
-        # Explicitly use openpyxl engine to prevent parser crashes
         return pd.read_excel(io.BytesIO(data), sheet_name=sheet if sheet is not None else 0, engine="openpyxl")
     last_err = None
     for enc in ("utf-8-sig", "latin-1"):
@@ -189,49 +121,81 @@ def idx(options, value):
     return options.index(value) if value in options else 0
 
 
-# ----------------------------------------------------------------- FRICTIONLESS SME AUTH GATE
+# ----------------------------------------------------------------- SPLASH SCREEN & AUTH GATE
 if not st.session_state.get("authenticated"):
-    _, col, _ = st.columns([1, 2, 1])
-    with col:
-        st.markdown(f"<br><br><h1 style='text-align:center;'>AI CFO Suite "
-                    f"<span class='sme-badge'>FOR SMALL BUSINESS</span></h1>", unsafe_allow_html=True)
-        st.markdown("<p style='text-align:center;color:#94a3b8;margin-bottom:30px;'>"
-                    "Automated Financial Audits • Bank-Ready Decks • On-Demand CFO Advice</p>", unsafe_allow_html=True)
-        
-        with st.form("sme_auth_form"):
-            st.markdown("### 🔐 Enter Business Workspace")
-            client_email = st.text_input("Business Email", placeholder="owner@company.com")
-            company_name = st.text_input("Company Name", placeholder="Acme Services")
-            access_key = st.text_input("Access Passcode", type="password", placeholder="Enter beta passcode")
+    if "show_login" not in st.session_state:
+        st.session_state["show_login"] = False
+
+    if not st.session_state["show_login"]:
+        # --- SPLASH SCREEN ---
+        _, col, _ = st.columns([1, 2.5, 1])
+        with col:
+            st.markdown("<br><br>", unsafe_allow_html=True)
+            st.markdown("<h1 style='text-align:center;'>💼 AI CFO Suite <span class='sme-badge'>PILOT v1.2</span></h1>", unsafe_allow_html=True)
+            st.markdown("<p style='text-align:center;color:#94a3b8;font-size:1.1rem;margin-bottom:30px;'>"
+                        "Turn messy monthly business records (Excel, QuickBooks, Shopify) into bank-ready financial reports, "
+                        "growth scenarios, and automated CFO briefs in 60 seconds.</p>", unsafe_allow_html=True)
             
-            submitted = st.form_submit_button("🚀 Launch Business Dashboard")
-            if submitted:
-                if access_key == BACKEND_SECRET_KEY or access_key == "demo-beta-2026" or not BACKEND_SECRET_KEY:
-                    user_email = client_email.strip().lower() if client_email else "guest@sme.com"
-                    comp_name = company_name.strip() if company_name else "Independent SME"
-                    
-                    st.session_state["authenticated"] = True
-                    st.session_state["user"] = user_email
-                    st.session_state["company_name"] = comp_name
-                    
-                    log_tenant_activity(user_email, comp_name, "Workspace Sign-In")
-                    st.rerun()
-                else:
-                    st.error("❌ Invalid access passcode. (Tip: Use demo-beta-2026)")
-    st.stop()
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Speed", "60 Seconds", "Automated")
+            c2.metric("Reports", "12-Slide Deck", "Bank-Ready")
+            c3.metric("Insights", "Fractional CFO", "AI-Powered")
+            
+            st.markdown("<br>", unsafe_allow_html=True)
+            if st.button("🚀 Get Started / Enter Workspace", type="primary"):
+                st.session_state["show_login"] = True
+                st.rerun()
+        st.stop()
+    else:
+        # --- LOGIN / WORKSPACE GATE ---
+        _, col, _ = st.columns([1, 2, 1])
+        with col:
+            st.markdown(f"<br><br><h1 style='text-align:center;'>Business Access Portal</h1>", unsafe_allow_html=True)
+            st.markdown("<p style='text-align:center;color:#94a3b8;margin-bottom:20px;'>Enter your business details to load your secure state history.</p>", unsafe_allow_html=True)
+            
+            with st.form("sme_auth_form"):
+                client_email = st.text_input("Business Email", placeholder="owner@company.com")
+                company_name = st.text_input("Company Name", placeholder="Acme Services")
+                access_key = st.text_input("Beta Passcode", type="password", placeholder="Enter access passcode")
+                
+                submitted = st.form_submit_button("🔓 Launch Secure Dashboard")
+                if submitted:
+                    if access_key == BETA_PASSCODE or access_key == BACKEND_SECRET_KEY:
+                        user_email = client_email.strip().lower() if client_email else "guest@sme.com"
+                        comp_name = company_name.strip() if company_name else "Independent SME"
+                        
+                        st.session_state["authenticated"] = True
+                        st.session_state["user"] = user_email
+                        st.session_state["company_name"] = comp_name
+                        
+                        log_tenant_activity(user_email, comp_name, "Workspace Sign-In")
+                        st.rerun()
+                    else:
+                        st.error("❌ Invalid access passcode. Please check with the founder.")
+            if st.button("← Back to Welcome Screen"):
+                st.session_state["show_login"] = False
+                st.rerun()
+        st.stop()
 
 USER = st.session_state["user"]
 COMPANY = st.session_state.get("company_name", "Independent SME")
 
 # ------------------------------------------------------------- WORKSPACE
-if not BACKEND_SECRET_KEY:
-    st.warning("⚠️ BACKEND_SECRET_KEY is not configured, so AI advisory is disabled.")
-elif not check_backend_status(BACKEND_URL, BACKEND_SECRET_KEY):
+if not check_backend_status(BACKEND_URL, BACKEND_SECRET_KEY):
     st.warning("⚠️ Backend API is waking up or offline. AI advisory may not work yet.")
 
 uploaded = st.file_uploader("📁 Upload Monthly Business File (.csv or .xlsx - QuickBooks, Shopify, Excel)", type=["csv", "xlsx"])
 if uploaded is None:
-    st.info("👋 Upload your monthly business spreadsheet above to get started.")
+    st.info("👋 Upload your monthly business spreadsheet above to get started, or check your **History** tab for past audits.")
+    
+    # Show History even before upload if available
+    st.markdown("---")
+    st.subheader("📂 Your Past Saved Audits & History")
+    history_records = load_user_history_db(USER)
+    if history_records:
+        st.dataframe(pd.DataFrame(history_records)[["file_name", "total_revenue", "net_profit", "profit_margin", "timestamp"]], use_container_width=True)
+    else:
+        st.info("No past audit records found for this email yet. Upload a file to begin!")
     st.stop()
 
 data = uploaded.getvalue()
@@ -294,13 +258,14 @@ st.sidebar.markdown("---")
 st.sidebar.markdown(f"### 👤 Company: `{COMPANY}`")
 if st.sidebar.button("🔒 Exit Workspace"):
     st.session_state["authenticated"] = False
+    st.session_state["show_login"] = False
     st.rerun()
 
-# --- FOUNDER ADMIN PANEL (PASSWORD: Caleb@2020) ---
+# --- SECURED FOUNDER ADMIN PANEL (Uses environment variable password) ---
 st.sidebar.markdown("---")
 with st.sidebar.expander("🛠️ Founder Admin Panel"):
     admin_pass = st.text_input("Master Password", type="password", key="admin_password_input")
-    if admin_pass == "Caleb@2020":
+    if admin_pass == ADMIN_PASSWORD:
         st.success("🔓 Admin Unlocked")
         if os.path.exists(DB_FILE):
             conn = duckdb.connect(DB_FILE)
@@ -324,7 +289,7 @@ with st.sidebar.expander("🛠️ Founder Admin Panel"):
         st.error("❌ Incorrect password")
 
 tabs = st.tabs(["💰 Cash & Profit", "🏆 Top Products", "🚨 Red Flags",
-                "🧮 Pricing Calculator", "🧠 AI CFO Brief", "📊 Pitch Deck", "💬 Feedback"])
+                "🧮 Pricing Calculator", "🧠 AI CFO Brief", "📊 Pitch Deck", "📂 History", "💬 Feedback"])
 
 with tabs[0]:
     st.subheader("Monthly Cash & Profit Summary")
@@ -468,10 +433,14 @@ with tabs[4]:
                 except Exception:
                     body = {"detail": res_ai.text or "Server error."}
                 if res_ai.status_code == 200:
+                    advice_text = body.get("advisory", "")
                     st.markdown("### 📋 Monthly Business Intelligence Brief")
                     st.markdown('<div class="saas-card">', unsafe_allow_html=True)
-                    st.markdown(body.get("advisory", ""))
+                    st.markdown(advice_text)
                     st.markdown("</div>", unsafe_allow_html=True)
+                    
+                    # Save audit history state to DB
+                    save_audit_history_db(USER, COMPANY, uploaded.name, totals, advice_text)
                     log_tenant_activity(USER, COMPANY, "Generated AI CFO Brief")
                 else:
                     st.error(body.get("detail", "AI advisory request failed."))
@@ -497,6 +466,22 @@ with tabs[5]:
                            type="primary")
 
 with tabs[6]:
+    st.subheader("📂 Dedicated User History & Saved Audits")
+    st.caption("Review all your past uploaded files, financial summaries, and generated AI briefs linked to your account.")
+    history_records = load_user_history_db(USER)
+    if history_records:
+        st.dataframe(pd.DataFrame(history_records)[["file_name", "total_revenue", "net_profit", "profit_margin", "timestamp"]], use_container_width=True)
+        
+        with st.expander("🔍 View Saved AI Briefs"):
+            for rec in history_records:
+                if rec.get("ai_brief"):
+                    st.markdown(f"**File:** `{rec['file_name']}` | **Date:** {rec['timestamp']}")
+                    st.markdown(rec["ai_brief"])
+                    st.markdown("---")
+    else:
+        st.info("No audit history saved yet. Generate an AI CFO Brief to save your state.")
+
+with tabs[7]:
     st.subheader("💬 Direct Founder Feedback & Support")
     st.caption("Encountered an issue or have a feature request? Send a direct message to the app founder.")
     
