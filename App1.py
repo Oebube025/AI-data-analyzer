@@ -1,9 +1,10 @@
 """
 FINCH - AI Business Intelligence Frontend (App1.py)
-Rebranded to FINCH with precise inline SVG geometric bird logo 
-and smooth CSS swooping/flapping animations.
+Rebranded to FINCH (v2.9) featuring the exact SVG bird asset (`finch_bird.svg`) 
+with smooth CSS swooping entry and wing-flapping animation.
 """
 
+import base64
 import hashlib
 import hmac
 import io
@@ -26,7 +27,7 @@ from database import (init_db, load_scenarios_db, save_scenario_db, delete_scena
 from deck_builder import create_executive_deck
 from simulator import calculate_scenario, generate_sensitivity_matrix
 
-APP_VERSION = "2.7"
+APP_VERSION = "2.9"
 
 st.set_page_config(page_title="FINCH | AI Business Intelligence", page_icon="🐦",
                    layout="wide", initial_sidebar_state="expanded")
@@ -130,6 +131,15 @@ def idx(options, value):
     return options.index(value) if value in options else 0
 
 
+def get_base64_svg(svg_path: str) -> str:
+    """Safely loads SVG file and returns base64 string."""
+    for path in [svg_path, "finch_bird.svg", "finch_logo.jpeg"]:
+        if os.path.exists(path):
+            with open(path, "rb") as f:
+                return base64.b64encode(f.read()).decode("utf-8")
+    return ""
+
+
 # ----------------------------------------------------------------- AUTH STATE MACHINE
 if not st.session_state.get("user"):
     if "nav_state" not in st.session_state:
@@ -138,55 +148,36 @@ if not st.session_state.get("user"):
     if st.session_state["nav_state"] == "splash":
         _, col, _ = st.columns([1, 2.5, 1])
         with col:
-            # --- PRECISE GEOMETRIC SVG FINCH BIRD WITH SWOOP & WING FLAP ANIMATION ---
-            finch_svg_logo = """
-            <div style="display: flex; justify-content: center; align-items: center; width: 100%; padding: 15px 0;">
-                <style>
-                    @keyframes flyInSwoop {
-                        0% { transform: translate(-350px, -120px) scale(0.2) rotate(-35deg); opacity: 0; }
-                        50% { transform: translate(30px, 15px) scale(1.1) rotate(10deg); opacity: 1; }
-                        75% { transform: translate(-8px, -4px) scale(0.95) rotate(-4deg); opacity: 1; }
-                        100% { transform: translate(0, 0) scale(1) rotate(0deg); opacity: 1; }
-                    }
-                    @keyframes wingFlap {
-                        0%, 100% { transform: rotate(0deg) scaleY(1); }
-                        50% { transform: rotate(-14deg) scaleY(0.85); }
-                    }
-                    .finch-svg-wrapper {
-                        animation: flyInSwoop 1.6s cubic-bezier(0.22, 1, 0.36, 1) forwards;
-                    }
-                    .finch-wing-animated {
-                        transform-origin: 105px 85px;
-                        animation: wingFlap 0.75s ease-in-out infinite 1.6s;
-                    }
-                </style>
-                <div class="finch-svg-wrapper">
-                    <svg width="220" height="180" viewBox="0 0 240 200" fill="none" xmlns="http://www.w3.org/2000/svg">
-                        <!-- Head & Beak (Gold/Orange #F5A623) -->
-                        <path d="M 135 55 C 150 40, 175 45, 170 65 C 165 80, 140 80, 125 68 Z" fill="#F5A623" stroke="#FFFFFF" stroke-width="1.8" stroke-linejoin="round"/>
-                        <circle cx="155" cy="56" r="4" fill="#0B0F19" />
-                        
-                        <!-- Growth Arrow Beak -->
-                        <path d="M 165 60 L 200 30 M 200 30 L 186 30 M 200 30 L 200 44" stroke="#F5A623" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
-                        
-                        <!-- Geometric Body (Teal & Emerald Facets) -->
-                        <path d="M 100 80 C 120 60, 145 70, 140 105 C 130 135, 95 145, 80 120 Z" fill="#0F7B5F" stroke="#FFFFFF" stroke-width="1.8" stroke-linejoin="round"/>
-                        <path d="M 80 120 L 105 155 L 75 138 Z" fill="#0D654D" stroke="#FFFFFF" stroke-width="1.8" stroke-linejoin="round"/>
-                        <path d="M 75 138 L 58 165 L 88 148 Z" fill="#0A523F" stroke="#FFFFFF" stroke-width="1.8" stroke-linejoin="round"/>
-                        
-                        <!-- Animated Wing Facets -->
-                        <g class="finch-wing-animated">
-                            <path d="M 112 82 L 72 35 L 98 75 Z" fill="#10B981" stroke="#FFFFFF" stroke-width="1.8" stroke-linejoin="round"/>
-                            <path d="M 98 75 L 56 46 L 85 92 Z" fill="#0F7B5F" stroke="#FFFFFF" stroke-width="1.8" stroke-linejoin="round"/>
-                            <path d="M 85 92 L 46 62 L 74 110 Z" fill="#0D654D" stroke="#FFFFFF" stroke-width="1.8" stroke-linejoin="round"/>
-                        </g>
-                    </svg>
-                </div>
-            </div>
-            """
-            components.html(finch_svg_logo, height=195)
+            # --- EXACT SVG BIRD WITH SWOOP & WING FLAP ANIMATION ---
+            b64_svg = get_base64_svg("finch_bird.svg")
             
-            st.markdown("<h1 style='text-align:center;'>FINCH <span class='beta-badge'>PILOT v2.7</span></h1>", unsafe_allow_html=True)
+            if b64_svg:
+                animated_logo_html = f"""
+                <div style="display: flex; justify-content: center; align-items: center; width: 100%; padding: 10px 0;">
+                    <style>
+                        @keyframes flyInSwoop {{
+                            0% {{ transform: translate(-350px, -120px) scale(0.2) rotate(-35deg); opacity: 0; }}
+                            50% {{ transform: translate(35px, 15px) scale(1.1) rotate(10deg); opacity: 1; }}
+                            75% {{ transform: translate(-8px, -4px) scale(0.95) rotate(-4deg); opacity: 1; }}
+                            100% {{ transform: translate(0, 0) scale(1) rotate(0deg); opacity: 1; }}
+                        }}
+                        @keyframes wingFlap {{
+                            0%, 100% {{ transform: translateY(0) scaleY(1); }}
+                            50% {{ transform: translateY(-7px) scaleY(0.93); }}
+                        }}
+                        .finch-svg-container {{
+                            width: 260px;
+                            animation: flyInSwoop 1.5s cubic-bezier(0.22, 1, 0.36, 1) forwards, wingFlap 2.2s ease-in-out infinite 1.5s;
+                        }}
+                    </style>
+                    <div class="finch-svg-container">
+                        <img src="data:image/svg+xml;base64,{b64_svg}" alt="FINCH Bird Logo" style="width: 100%; height: auto;" />
+                    </div>
+                </div>
+                """
+                components.html(animated_logo_html, height=200)
+            
+            st.markdown("<h1 style='text-align:center;'>FINCH <span class='beta-badge'>PILOT v2.9</span></h1>", unsafe_allow_html=True)
             st.markdown("<p style='text-align:center;color:#94a3b8;font-size:1.1rem;margin-bottom:30px;'>"
                         "Transform business transaction exports into structured financial reports, "
                         "growth scenarios, and automated AI insights.</p>", unsafe_allow_html=True)
