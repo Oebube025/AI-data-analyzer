@@ -89,6 +89,7 @@ def create_executive_deck(facts: dict, currency: str = "₦", filename: str = "d
     money = lambda v: f"{currency}{v:,.2f}"
     insights = derive_insights(facts, currency)
     scenarios = scenarios or []
+    cost_known = t["cost_known"]
 
     # 1 Title
     s = _new_slide(prs)
@@ -100,11 +101,11 @@ def create_executive_deck(facts: dict, currency: str = "₦", filename: str = "d
     # 2 Financial snapshot
     s = _slide(prs, "Your Numbers at a Glance", filename)
     kpis = [("REVENUE", money(t["total_revenue"]))]
-    if t["cost_known"]:
+    if cost_known:
         kpis += [("COSTS", money(t["total_costs"])), ("NET PROFIT", money(t["net_profit"])),
                  ("MARGIN", _fmt_pct(t["profit_margin"]))]
     else:
-        kpis += [("COSTS", "Not provided"), ("NET PROFIT", "n/a"), ("MARGIN", "n/a")]
+        kpis += [("COSTS", "Not provided (Assumed in models)"), ("NET PROFIT", "n/a"), ("MARGIN", "n/a")]
     for i, (lbl, val) in enumerate(kpis):
         _textbox(s, 0.8 + i * 3.0, 1.8, 2.8, 1.5, [(lbl, 11, THEME_MUTED, True), (val, 22, THEME_TEXT, True)])
     _textbox(s, 0.8, 3.7, 11.7, 0.5, [("Key observations", 16, THEME_TEXT, True)])
@@ -128,7 +129,7 @@ def create_executive_deck(facts: dict, currency: str = "₦", filename: str = "d
 
     # 5 Revenue and profit
     s = _slide(prs, "Money In, Money Out", filename)
-    if t["cost_known"]:
+    if cost_known:
         _chart(s, ["Revenue", "Costs", "Net Profit"], [t["total_revenue"], t["total_costs"], t["net_profit"]],
                0.8, 1.7, 7.8, 5.1, name="Amount")
         cost_pct = t["total_costs"] / t["total_revenue"] * 100 if t["total_revenue"] > 0 else None
@@ -138,7 +139,7 @@ def create_executive_deck(facts: dict, currency: str = "₦", filename: str = "d
         ], x=8.9, y=2.0, w=3.8, h=4, size=14)
     else:
         _bullets(s, [f"Total revenue is {money(t['total_revenue'])}.",
-                     "Cost data was not provided, so profit and margin cannot be shown."])
+                     "Cost data was NOT provided in source file (profitability estimated via scenario assumptions)."])
 
     # 6 Top and bottom performers
     s = _slide(prs, "Best and Weakest Sellers", filename)
@@ -168,16 +169,15 @@ def create_executive_deck(facts: dict, currency: str = "₦", filename: str = "d
         _bullets(s, ["No usable date column was selected, so no trend is available."])
 
     # 8 Scenario outlook
-    s = _slide(prs, "What-If Plans", filename)
+    s = _slide(prs, "What-If Plans (Cost-Assumed Model)", filename)
     if scenarios:
-        lines = []
-        for sc in scenarios[-6:]:
+        lines = ["Note: Scenarios apply explicit fixed/variable cost separation models."]
+        for sc in scenarios[-5:]:
             lines.append(f"{sc.get('scenario_name')}: revenue {money(sc['revenue'])}, "
                          f"net profit {money(sc['net_profit'])}, margin {_fmt_pct(sc.get('margin'))}")
         _bullets(s, lines, size=14)
     else:
-        _bullets(s, ["No What-If scenarios have been saved yet.",
-                     "Model price, volume and cost changes in the simulator and save them to include them here."])
+        _bullets(s, ["No What-If scenarios have been saved yet."])
 
     # 9 Risks
     s = _slide(prs, "Things to Watch", filename)
@@ -196,9 +196,7 @@ def create_executive_deck(facts: dict, currency: str = "₦", filename: str = "d
              f"Duplicate rows: {meta['duplicate_rows']:,}"]
     if meta["anomaly_count"]:
         vals = [a.get(rev_col) for a in facts["anomalies"][:5]]
-        lines.append(f"{meta['anomaly_count']} unusually large transaction(s) found. Largest values: "
-                     + ", ".join(money(v) for v in vals if v is not None))
-        lines.append("Review these before drawing final conclusions.")
+        lines.append(f"{meta['anomaly_count']} unusually large transaction(s) found.")
     else:
         lines.append("No significant outliers detected.")
     _bullets(s, lines)
@@ -206,10 +204,8 @@ def create_executive_deck(facts: dict, currency: str = "₦", filename: str = "d
     # 12 Appendix
     s = _slide(prs, "Notes: How This Was Worked Out", filename)
     lines = [
-        f"Revenue column: {rev_col}. Cost column: {meta['cost_column'] or 'none'}. "
-        f"Category column: {cat_col or 'none'}. Date column: {meta['date_column'] or 'none'}.",
-        "All figures are computed directly from the uploaded data; no figures are estimated.",
-        "Outliers use the 1.5 x IQR rule on the revenue column.",
+        f"Revenue column: {rev_col}. Cost column: {meta['cost_column'] or 'none (Assumed)'}.",
+        "All figures computed directly from uploaded records.",
     ] + facts["warnings"][:6]
     _bullets(s, lines, size=12, color=THEME_MUTED)
 
