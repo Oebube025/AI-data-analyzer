@@ -1,7 +1,7 @@
 """
 Executive Data Intelligence Suite - Streamlit Frontend (App1.py)
-Frictionless SME Login, automated CFO briefs, bank-ready decks, 
-in-app feedback, and password-protected Founder Admin panel.
+Modern Dark Glassmorphism & Claymorphism UI, Frictionless SME Login, 
+Automated CFO Briefs, Bank-Ready Decks, and Founder Admin Panel.
 """
 
 import hashlib
@@ -25,20 +25,105 @@ from database import (init_db, load_scenarios_db,
 from deck_builder import create_executive_deck
 from simulator import calculate_scenario, generate_sensitivity_matrix
 
-APP_VERSION = "1.0"
+APP_VERSION = "1.1"
 
 st.set_page_config(page_title="AI CFO Suite for Small Business", page_icon="💼",
                    layout="wide", initial_sidebar_state="expanded")
 
+# --- MODERN DARK, GLASSMORPHISM & CLAYMORPHISM STYLING ---
 st.markdown("""
 <style>
-    .stApp { background-color: #0f172a; color: #e2e8f0; }
-    section[data-testid="stSidebar"] { background-color: #090d16; border-right: 1px solid #1e293b; }
-    .saas-card { background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); border: 1px solid #334155; padding: 28px; border-radius: 12px; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.4); margin-bottom: 20px; }
-    .sme-badge { background-color: #10b981; color: #ffffff; font-size: 0.75rem; font-weight: 700; padding: 3px 10px; border-radius: 6px; vertical-align: middle; margin-left: 8px; }
-    h1, h2, h3 { color: #f8fafc; letter-spacing: -0.02em; }
-    .stButton>button { background-color: #2563eb; color: white; border: none; border-radius: 8px; font-weight: 600; padding: 0.6rem 1.2rem; width: 100%; transition: all 0.2s ease; }
-    .stButton>button:hover { background-color: #1d4ed8; box-shadow: 0 4px 12px rgba(37,99,235,0.4); }
+    /* Global Deep Dark Blue Background */
+    .stApp { 
+        background-color: #0b0f19; 
+        color: #f1f5f9; 
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    }
+    
+    /* Sidebar Styling */
+    section[data-testid="stSidebar"] { 
+        background-color: #050811; 
+        border-right: 1px solid rgba(30, 41, 59, 0.6); 
+    }
+    
+    /* Glassmorphism Main SaaS Cards */
+    .saas-card { 
+        background: linear-gradient(135deg, rgba(30, 41, 59, 0.65) 0%, rgba(15, 23, 42, 0.85) 100%); 
+        border: 1px solid rgba(51, 65, 85, 0.5); 
+        backdrop-filter: blur(16px);
+        padding: 28px; 
+        border-radius: 18px; 
+        box-shadow: 0 12px 32px -4px rgba(0, 0, 0, 0.6); 
+        margin-bottom: 24px; 
+    }
+    
+    /* Claymorphism 3D Tactile KPI Metric Cards */
+    div[data-testid="stMetric"] {
+        background: linear-gradient(145deg, #162032, #101726);
+        border: 1px solid rgba(71, 85, 105, 0.4);
+        padding: 20px;
+        border-radius: 16px;
+        box-shadow: inset 0 2px 4px rgba(255, 255, 255, 0.05), 
+                    0 12px 28px rgba(0, 0, 0, 0.5);
+        transition: transform 0.2s ease;
+    }
+    div[data-testid="stMetric"]:hover {
+        transform: translateY(-2px);
+        border-color: rgba(59, 130, 246, 0.4);
+    }
+    div[data-testid="stMetric"] label {
+        color: #94a3b8 !important;
+        font-weight: 500;
+        font-size: 0.85rem !important;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+    }
+    div[data-testid="stMetric"] [data-testid="stMetricValue"] {
+        color: #f8fafc !important;
+        font-weight: 700;
+    }
+
+    /* SME Badge */
+    .sme-badge { 
+        background: linear-gradient(135deg, #10b981 0%, #059669 100%); 
+        color: #ffffff; 
+        font-size: 0.7rem; 
+        font-weight: 700; 
+        padding: 4px 10px; 
+        border-radius: 20px; 
+        vertical-align: middle; 
+        margin-left: 8px; 
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+        box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
+    }
+    
+    /* Typography Headers */
+    h1, h2, h3 { 
+        color: #f8fafc; 
+        letter-spacing: -0.03em; 
+        font-weight: 700;
+    }
+    
+    /* Primary Action Buttons (Clay/Glow) */
+    .stButton>button { 
+        background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%); 
+        color: white; 
+        border: none; 
+        border-radius: 12px; 
+        font-weight: 600; 
+        padding: 0.6rem 1.2rem; 
+        width: 100%; 
+        transition: all 0.25s ease;
+        box-shadow: inset 0 2px 4px rgba(255, 255, 255, 0.2), 
+                    0 6px 16px rgba(37, 99, 235, 0.4);
+    }
+    .stButton>button:hover { 
+        background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%); 
+        box-shadow: inset 0 2px 4px rgba(255, 255, 255, 0.3), 
+                    0 8px 22px rgba(37, 99, 235, 0.6); 
+        transform: translateY(-1px);
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -79,8 +164,10 @@ def get_facts(df: pd.DataFrame, rev, cost, cat, date, notes: tuple):
 
 
 def read_upload(name: str, data: bytes, sheet=None) -> pd.DataFrame:
+    """Robust Excel and CSV file reader fixing parsing errors."""
     if name.lower().endswith(".xlsx"):
-        return pd.read_excel(io.BytesIO(data), sheet_name=sheet if sheet is not None else 0)
+        # Explicitly use openpyxl engine to prevent parser crashes
+        return pd.read_excel(io.BytesIO(data), sheet_name=sheet if sheet is not None else 0, engine="openpyxl")
     last_err = None
     for enc in ("utf-8-sig", "latin-1"):
         try:
@@ -119,7 +206,6 @@ if not st.session_state.get("authenticated"):
             
             submitted = st.form_submit_button("🚀 Launch Business Dashboard")
             if submitted:
-                # Accept backend secret key or the default demo passkey
                 if access_key == BACKEND_SECRET_KEY or access_key == "demo-beta-2026" or not BACKEND_SECRET_KEY:
                     user_email = client_email.strip().lower() if client_email else "guest@sme.com"
                     comp_name = company_name.strip() if company_name else "Independent SME"
@@ -156,7 +242,7 @@ if len(data) / (1024 * 1024) > 10:
 sheet = None
 if uploaded.name.lower().endswith(".xlsx"):
     try:
-        sheets = pd.ExcelFile(io.BytesIO(data)).sheet_names
+        sheets = pd.ExcelFile(io.BytesIO(data), engine="openpyxl").sheet_names
     except Exception as e:
         st.error(f"Could not open the Excel file: {e}")
         st.stop()
@@ -261,15 +347,18 @@ with tabs[0]:
                          color=["Sales", "Costs", "Net Profit"], template="plotly_dark")
         else:
             fig = px.histogram(df, x=sel_rev, title=f"Distribution of {sel_rev}", template="plotly_dark")
+        fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
         st.plotly_chart(fig, use_container_width=True)
     with g2:
         rbc = facts["revenue_by_category"]
         if rbc:
             pie_df = pd.DataFrame(list(rbc.items())[:6], columns=["Category", "Revenue"])
             pie_df = pie_df[pie_df["Revenue"] > 0]
-            st.plotly_chart(px.pie(pie_df, names="Category", values="Revenue",
-                                   title=f"Top {meta['category_column']} Revenue Share",
-                                   template="plotly_dark", hole=0.4), use_container_width=True)
+            fig_pie = px.pie(pie_df, names="Category", values="Revenue",
+                             title=f"Top {meta['category_column']} Revenue Share",
+                             template="plotly_dark", hole=0.4)
+            fig_pie.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
+            st.plotly_chart(fig_pie, use_container_width=True)
         else:
             st.info("Select a category column to see revenue share.")
     st.markdown("### Uploaded Data Preview")
@@ -279,9 +368,10 @@ with tabs[1]:
     st.subheader("Sales Trends & Leaderboards")
     if len(trend["points"]) >= 2:
         tdf = pd.DataFrame(trend["points"])
-        st.plotly_chart(px.line(tdf, x="period", y="revenue", markers=True, template="plotly_dark",
-                                title=f"Revenue by {trend['granularity']} (chronological)"),
-                        use_container_width=True)
+        fig_trend = px.line(tdf, x="period", y="revenue", markers=True, template="plotly_dark",
+                            title=f"Revenue by {trend['granularity']} (chronological)")
+        fig_trend.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
+        st.plotly_chart(fig_trend, use_container_width=True)
         if trend["change_pct"] is not None:
             st.metric(f"Latest {trend['granularity']} vs previous", f"{trend['change_pct']:+.1f}%")
     elif sel_date == "None":
@@ -296,8 +386,10 @@ with tabs[1]:
             st.markdown("#### Top Revenue Contributors")
             st.dataframe(gdf.head(10), use_container_width=True)
         with b:
-            st.plotly_chart(px.bar(gdf.head(10), x="Category", y="Revenue", template="plotly_dark",
-                                   title="Top 10 by Revenue"), use_container_width=True)
+            fig_bar = px.bar(gdf.head(10), x="Category", y="Revenue", template="plotly_dark",
+                             title="Top 10 by Revenue")
+            fig_bar.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
+            st.plotly_chart(fig_bar, use_container_width=True)
 
 with tabs[2]:
     st.subheader("Data Health Check & Red Flag Audit")
