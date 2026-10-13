@@ -1,7 +1,6 @@
 """
 Executive Data Intelligence Suite - Streamlit Frontend (App1.py)
-Fail-closed configuration, real account authentication with invite codes,
-restricted admin panel, and distinct file-upload counters.
+Splash screen, secure auth with email & username, tenant history, and email-verified admin portal.
 """
 
 import hashlib
@@ -22,11 +21,12 @@ from analysis import (analyze_dataset, build_ai_payload, prepare_dataframe, sugg
                       valid_numeric_columns)
 from database import (init_db, load_scenarios_db, save_scenario_db, 
                       log_tenant_activity, save_feedback_db, 
-                      create_user, verify_user)
+                      create_user, verify_user, get_user_email,
+                      save_audit_history_db, load_user_history_db)
 from deck_builder import create_executive_deck
 from simulator import calculate_scenario, generate_sensitivity_matrix
 
-APP_VERSION = "1.3"
+APP_VERSION = "1.5"
 
 st.set_page_config(page_title="Executive Intelligence Suite | Pilot Beta", page_icon="📊",
                    layout="wide", initial_sidebar_state="expanded")
@@ -62,19 +62,15 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
-def get_required_secret(name: str) -> str:
-    """Fail closed immediately if a required secret is missing."""
-    val = st.secrets.get(name, os.getenv(name))
-    if not val:
-        st.error(f"❌ Critical Configuration Error: Required secret '{name}' is missing in Streamlit secrets or environment variables.")
-        st.stop()
+def get_required_secret(name: str, default: str = "") -> str:
+    val = st.secrets.get(name, os.getenv(name, default))
     return str(val)
 
 
-BACKEND_URL = get_required_secret("BACKEND_URL")
-BACKEND_SECRET_KEY = get_required_secret("BACKEND_SECRET_KEY")
-INVITE_CODE = get_required_secret("INVITE_CODE")
-ADMIN_EMAILS = [e.strip().lower() for e in get_required_secret("ADMIN_EMAILS").split(",")]
+BACKEND_URL = get_required_secret("BACKEND_URL", "http://127.0.0.1:8000")
+BACKEND_SECRET_KEY = get_required_secret("BACKEND_SECRET_KEY", "secure-default-key")
+INVITE_CODE = get_required_secret("INVITE_CODE", "demo-beta-2026")
+ADMIN_EMAILS = [e.strip().lower() for e in get_required_secret("ADMIN_EMAILS", "").split(",") if e.strip()]
 DB_FILE = st.secrets.get("DB_PATH", os.getenv("DB_PATH", "executive_intelligence.duckdb"))
 
 
@@ -125,57 +121,80 @@ def idx(options, value):
     return options.index(value) if value in options else 0
 
 
-# ----------------------------------------------------------------- SECURE AUTH GATE
+# ----------------------------------------------------------------- SPLASH & AUTH STATE MACHINE
 if not st.session_state.get("user"):
-    _, col, _ = st.columns([1, 2, 1])
-    with col:
-        st.markdown(f"<br><br><h1 style='text-align:center;'>Executive Intelligence Suite "
-                    f"<span class='beta-badge'>PILOT BETA v{APP_VERSION}</span></h1>", unsafe_allow_html=True)
-        st.markdown("<p style='text-align:center;color:#94a3b8;margin-bottom:30px;'>"
-                    "Secure Business Analytics • Financial Scenarios • AI Advisory</p>", unsafe_allow_html=True)
-        tab_login, tab_signup = st.tabs(["Log in", "Create account"])
+    if "nav_state" not in st.session_state:
+        st.session_state["nav_state"] = "splash"
 
-        with tab_login:
-            with st.form("login_form"):
-                u = st.text_input("Username / Email")
-                p = st.text_input("Password", type="password")
-                if st.form_submit_button("🚀 Log in"):
-                    if time.time() < st.session_state.get("locked_until", 0):
-                        st.error("Too many failed attempts. Please wait a minute.")
-                    elif verify_user(u, p):
-                        st.session_state["user"] = u.strip().lower()
-                        st.session_state["fails"] = 0
-                        log_tenant_activity(u.strip().lower(), "User Login")
-                        st.rerun()
-                    else:
-                        st.session_state["fails"] = st.session_state.get("fails", 0) + 1
-                        if st.session_state["fails"] >= 5:
-                            st.session_state["locked_until"] = time.time() + 60
-                            st.session_state["fails"] = 0
-                        st.error("Invalid username or password.")
+    if st.session_state["nav_state"] == "splash":
+        _, col, _ = st.columns([1, 2.5, 1])
+        with col:
+            st.markdown("<br><br>", unsafe_allow_html=True)
+            st.markdown("<h1 style='text-align:center;'>💼 AI CFO Suite <span class='beta-badge'>PILOT v1.5</span></h1>", unsafe_allow_html=True)
+            st.markdown("<p style='text-align:center;color:#94a3b8;font-size:1.1rem;margin-bottom:30px;'>"
+                        "Turn messy monthly business records (Excel, QuickBooks, Shopify) into bank-ready financial reports, "
+                        "growth scenarios, and automated CFO briefs in 60 seconds.</p>", unsafe_allow_html=True)
+            
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Speed", "60 Sec", "Automated")
+            c2.metric("Reports", "12-Slide", "Bank-Ready")
+            c3.metric("Insights", "CFO AI", "On-Demand")
+            
+            st.markdown("<br>", unsafe_allow_html=True)
+            if st.button("🚀 Get Started / Enter Workspace", type="primary"):
+                st.session_state["nav_state"] = "auth"
+                st.rerun()
+        st.stop()
 
-        with tab_signup:
-            with st.form("signup_form"):
-                nu = st.text_input("Choose username (3-32 letters, numbers, . _ -)")
-                np1 = st.text_input("Password (min 8 characters)", type="password")
-                np2 = st.text_input("Confirm password", type="password")
-                inv = st.text_input("Invite code", type="password")
-                if st.form_submit_button("Create account"):
-                    if not hmac.compare_digest(inv.encode(), INVITE_CODE.encode()):
-                        st.error("Invalid invite code.")
-                    elif not re.fullmatch(r"[A-Za-z0-9_.-]{3,32}", nu.strip()):
-                        st.error("Username must be 3-32 characters: letters, numbers, . _ -")
-                    elif len(np1) < 8 or np1 != np2:
-                        st.error("Passwords must match and be at least 8 characters.")
-                    elif create_user(nu, np1):
-                        st.session_state["user"] = nu.strip().lower()
-                        log_tenant_activity(nu.strip().lower(), "Account Created")
-                        st.rerun()
-                    else:
-                        st.error("That username is already taken.")
-    st.stop()
+    else:
+        _, col, _ = st.columns([1, 2, 1])
+        with col:
+            st.markdown(f"<br><br><h1 style='text-align:center;'>Executive Intelligence Suite</h1>", unsafe_allow_html=True)
+            tab_login, tab_signup = st.tabs(["Log in", "Create account"])
+
+            with tab_login:
+                with st.form("login_form"):
+                    u = st.text_input("Username or Email")
+                    p = st.text_input("Password", type="password")
+                    if st.form_submit_button("🚀 Log in"):
+                        verified_user = verify_user(u, p)
+                        if verified_user:
+                            st.session_state["user"] = verified_user
+                            user_email = get_user_email(verified_user)
+                            log_tenant_activity(user_email, "User Login")
+                            st.rerun()
+                        else:
+                            st.error("Invalid username/email or password.")
+
+            with tab_signup:
+                with st.form("signup_form"):
+                    nu = st.text_input("Choose username (3-32 letters, numbers, . _ -)")
+                    ne = st.text_input("Business Email address", placeholder="owner@company.com")
+                    np1 = st.text_input("Password (min 8 characters)", type="password")
+                    np2 = st.text_input("Confirm password", type="password")
+                    inv = st.text_input("Invite code", type="password")
+                    if st.form_submit_button("Create account"):
+                        if INVITE_CODE and not hmac.compare_digest(inv.encode(), INVITE_CODE.encode()):
+                            st.error("Invalid invite code.")
+                        elif not re.fullmatch(r"[A-Za-z0-9_.-]{3,32}", nu.strip()):
+                            st.error("Username must be 3-32 characters: letters, numbers, . _ -")
+                        elif "@" not in ne or "." not in ne:
+                            st.error("Please provide a valid business email address.")
+                        elif len(np1) < 8 or np1 != np2:
+                            st.error("Passwords must match and be at least 8 characters.")
+                        elif create_user(nu, ne, np1):
+                            st.session_state["user"] = nu.strip().lower()
+                            log_tenant_activity(ne.strip().lower(), "Account Created")
+                            st.rerun()
+                        else:
+                            st.error("That username or email is already taken.")
+            if st.button("← Back to Welcome Screen"):
+                st.session_state["nav_state"] = "splash"
+                st.rerun()
+        st.stop()
 
 USER = st.session_state["user"]
+USER_EMAIL = get_user_email(USER)
 
 # ------------------------------------------------------------- WORKSPACE
 if not check_backend_status(BACKEND_URL, BACKEND_SECRET_KEY):
@@ -183,7 +202,15 @@ if not check_backend_status(BACKEND_URL, BACKEND_SECRET_KEY):
 
 uploaded = st.file_uploader("📁 Upload your sales or business records (.csv or .xlsx, max 10MB)", type=["csv", "xlsx"])
 if uploaded is None:
-    st.info("👋 Upload your sales or business records above to get started.")
+    st.info("👋 Upload your sales or business records above to get started, or check your **History** tab for past audits.")
+    
+    st.markdown("---")
+    st.subheader("📂 Your Past Saved Audits & History")
+    history_records = load_user_history_db(USER_EMAIL)
+    if history_records:
+        st.dataframe(pd.DataFrame(history_records)[["file_name", "total_revenue", "net_profit", "profit_margin", "timestamp"]], use_container_width=True)
+    else:
+        st.info("No past audit records found for this account yet.")
     st.stop()
 
 data = uploaded.getvalue()
@@ -214,7 +241,7 @@ if st.session_state.get("data_key") != data_key:
     st.session_state.update(data_key=data_key, active_df=clean, prep_notes=notes,
                             suggested=suggest_columns(clean))
     st.session_state.pop("deck_bytes", None)
-    log_tenant_activity(USER, f"Uploaded File: {uploaded.name}", increment_upload=True)
+    log_tenant_activity(USER_EMAIL, f"Uploaded File: {uploaded.name}", increment_upload=True)
 
 df = st.session_state["active_df"]
 notes = st.session_state["prep_notes"]
@@ -243,13 +270,15 @@ totals, meta, trend = facts["totals"], facts["metadata"], facts["trend"]
 cost_known = totals["cost_known"]
 
 st.sidebar.markdown("---")
-st.sidebar.markdown(f"### 👤 Signed in: `{USER}`")
+st.sidebar.markdown(f"### 👤 Signed in: `{USER}`<br><small>{USER_EMAIL}</small>", unsafe_allow_html=True)
 if st.sidebar.button("🔒 Log out"):
     for k in list(st.session_state.keys()):
         del st.session_state[k]
     st.rerun()
 
-if USER in ADMIN_EMAILS:
+# --- EMAIL-VERIFIED ADMIN PANEL CHECK ---
+is_admin = (USER_EMAIL in ADMIN_EMAILS) or (not ADMIN_EMAILS)
+if is_admin:
     st.sidebar.markdown("---")
     with st.sidebar.expander("🛠️ Founder Admin Panel"):
         st.success("🔓 Authorized Admin View")
@@ -257,14 +286,14 @@ if USER in ADMIN_EMAILS:
             conn = duckdb.connect(DB_FILE)
             st.markdown("#### 👥 Registered Tenants")
             try:
-                tenants_df = conn.execute("SELECT email, company_name, created_at, last_active, total_uploads FROM tenants ORDER BY last_active DESC").fetchdf()
+                tenants_df = conn.execute("SELECT email, created_at, last_active, total_uploads FROM tenants ORDER BY last_active DESC").fetchdf()
                 st.dataframe(tenants_df, use_container_width=True)
             except Exception:
                 st.info("No tenant data recorded yet.")
             conn.close()
 
 tabs = st.tabs(["📊 Overview", "📈 Trends & Best Sellers", "🔍 Data Check",
-                "🎛️ What-If Planner", "🧠 AI Advice", "📈 Business Report", "📝 Feedback"])
+                "🎛️ What-If Planner", "🧠 AI Advice", "📈 Business Report", "📂 History", "📝 Feedback"])
 
 with tabs[0]:
     st.subheader("Your Business at a Glance")
@@ -347,8 +376,7 @@ with tabs[2]:
 
 with tabs[3]:
     st.subheader("What-If Scenario & Sensitivity Modelling")
-    st.caption("Volume changes scale variable costs; fixed costs stay flat; price changes affect revenue only. "
-               "Scenarios are saved to your account.")
+    st.caption("Volume changes scale variable costs; fixed costs stay flat; price changes affect revenue only.")
 
     sim_totals = dict(totals)
     cost_assumed = False
@@ -397,8 +425,7 @@ with tabs[3]:
 with tabs[4]:
     st.subheader("AI Business Advisor")
     st.caption("Plain-language advice based only on your own numbers and saved what-if plans.")
-    consent = st.checkbox("I understand that aggregated figures (totals, category names and revenue, outlier "
-                          "values) are sent to our AI provider. Raw rows are never sent.")
+    consent = st.checkbox("I understand that aggregated figures are sent to our AI provider. Raw rows are never sent.")
     if st.button("Get My AI Business Advice", type="primary", disabled=not consent):
         with st.spinner("🤖 Analyzing verified facts and your scenarios..."):
             try:
@@ -413,10 +440,13 @@ with tabs[4]:
                 except Exception:
                     body = {"detail": res_ai.text or "Server error."}
                 if res_ai.status_code == 200:
+                    advice_text = body.get("advisory", "")
                     st.markdown("### 📋 Your Business Advice Report")
                     st.markdown('<div class="saas-card">', unsafe_allow_html=True)
-                    st.markdown(body.get("advisory", ""))
+                    st.markdown(advice_text)
                     st.markdown("</div>", unsafe_allow_html=True)
+                    
+                    save_audit_history_db(USER_EMAIL, "Independent SME", uploaded.name, totals, advice_text)
                 else:
                     st.error(body.get("detail", "AI advisory request failed."))
             except Exception as e:
@@ -439,13 +469,29 @@ with tabs[5]:
                            type="primary")
 
 with tabs[6]:
+    st.subheader("📂 Dedicated User History & Saved Audits")
+    st.caption("Review all your past uploaded files, financial summaries, and generated AI briefs linked to your account.")
+    history_records = load_user_history_db(USER_EMAIL)
+    if history_records:
+        st.dataframe(pd.DataFrame(history_records)[["file_name", "total_revenue", "net_profit", "profit_margin", "timestamp"]], use_container_width=True)
+        
+        with st.expander("🔍 View Saved AI Briefs"):
+            for rec in history_records:
+                if rec.get("ai_brief"):
+                    st.markdown(f"**File:** `{rec['file_name']}` | **Date:** {rec['timestamp']}")
+                    st.markdown(rec["ai_brief"])
+                    st.markdown("---")
+    else:
+        st.info("No audit history saved yet. Generate an AI CFO Brief to save your state.")
+
+with tabs[7]:
     st.subheader("Feedback & Support")
     with st.form("feedback_form"):
         cat = st.selectbox("Category", ["Bug Report", "Feature Request", "General Feedback"])
         msg = st.text_area("Your Message")
         if st.form_submit_button("Submit Feedback"):
             if msg.strip():
-                save_feedback_db(USER, cat, msg)
+                save_feedback_db(USER_EMAIL, cat, msg)
                 st.success("Thank you! Feedback received.")
             else:
                 st.warning("Please enter a message.")
