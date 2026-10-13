@@ -1,6 +1,7 @@
 """
 FINCH - AI Business Intelligence Frontend (App1.py)
-With pure Inline SVG Geometric Finch Logo and wing-flapping swoop animation.
+Rebranded to FINCH with animated SVG logo[cite: 4], retail data audits, 
+robust column suggestions, and secure workspace navigation.
 """
 
 import hashlib
@@ -14,6 +15,7 @@ import pandas as pd
 import plotly.express as px
 import requests
 import streamlit as st
+import streamlit.components.v1 as components
 
 from analysis import (analyze_dataset, build_ai_payload, prepare_dataframe, suggest_columns,
                       valid_numeric_columns)
@@ -29,7 +31,7 @@ APP_VERSION = "2.3"
 st.set_page_config(page_title="FINCH | AI Business Intelligence", page_icon="🐦",
                    layout="wide", initial_sidebar_state="expanded")
 
-# --- SIGNATURE DARK GLASSMORPHISM & PURE SVG ANIMATED FINCH LOGO ---
+# --- SIGNATURE DARK GLASSMORPHISM & CLAYMORPHISM STYLING ---
 st.markdown("""
 <style>
     .stApp { background-color: #0b0f19; color: #f1f5f9; font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; }
@@ -56,37 +58,6 @@ st.markdown("""
         font-weight: 600; padding: 0.6rem 1.2rem; width: 100%; box-shadow: inset 0 2px 4px rgba(255, 255, 255, 0.2), 0 6px 16px rgba(16, 185, 129, 0.4);
     }
     .stButton>button:hover { background: linear-gradient(135deg, #059669 0%, #047857 100%); transform: translateY(-1px); }
-
-    /* --- ANIMATION: FLYING & FLAPPING FINCH BIRD --- */
-    @keyframes flyInSwoop {
-        0% { transform: translate(-350px, -150px) scale(0.2) rotate(-35deg); opacity: 0; }
-        50% { transform: translate(60px, 30px) scale(1.1) rotate(15deg); opacity: 1; }
-        75% { transform: translate(-15px, -10px) scale(0.95) rotate(-5deg); opacity: 1; }
-        100% { transform: translate(0, 0) scale(1) rotate(0deg); opacity: 1; }
-    }
-
-    @keyframes wingFlap {
-        0%, 100% { transform: rotate(0deg) scaleY(1); }
-        50% { transform: rotate(-12deg) scaleY(0.85); }
-    }
-
-    .finch-splash-container {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        margin-top: 20px;
-        margin-bottom: 20px;
-    }
-
-    .finch-svg-wrapper {
-        animation: flyInSwoop 1.6s cubic-bezier(0.22, 1, 0.36, 1) forwards;
-    }
-
-    .finch-wing-animated {
-        transform-origin: 100px 120px;
-        animation: wingFlap 0.8s ease-in-out infinite 1.6s;
-    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -169,22 +140,34 @@ if not st.session_state.get("user"):
         with col:
             # --- PURE SVG EXACT FINCH LOGO RECREATION WITH ANIMATION ---
             finch_svg_html = """
-            <div class="finch-splash-container">
-                <div class="finch-svg-wrapper">
-                    <svg width="180" height="150" viewBox="0 0 200 180" fill="none" xmlns="http://www.w3.org/2000/svg">
-                        <!-- Head & Beak (Orange/Gold) -->
+            <div style="display: flex; justify-content: center; align-items: center; width: 100%; padding: 10px 0;">
+                <style>
+                    @keyframes flyInSwoop {
+                        0% { transform: translate(-300px, -100px) scale(0.2) rotate(-35deg); opacity: 0; }
+                        50% { transform: translate(40px, 20px) scale(1.1) rotate(15deg); opacity: 1; }
+                        75% { transform: translate(-10px, -5px) scale(0.95) rotate(-5deg); opacity: 1; }
+                        100% { transform: translate(0, 0) scale(1) rotate(0deg); opacity: 1; }
+                    }
+                    @keyframes wingFlap {
+                        0%, 100% { transform: rotate(0deg) scaleY(1); }
+                        50% { transform: rotate(-14deg) scaleY(0.82); }
+                    }
+                    .finch-anim-wrapper {
+                        animation: flyInSwoop 1.6s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+                    }
+                    .finch-wing-animated {
+                        transform-origin: 90px 70px;
+                        animation: wingFlap 0.7s ease-in-out infinite 1.6s;
+                    }
+                </style>
+                <div class="finch-anim-wrapper">
+                    <svg width="200" height="160" viewBox="0 0 200 180" fill="none" xmlns="http://www.w3.org/2000/svg">
                         <path d="M 120 45 C 135 30, 155 35, 150 55 C 145 70, 125 70, 115 55 Z" fill="#F5A623" stroke="#FFFFFF" stroke-width="1.5" />
                         <circle cx="138" cy="45" r="3.5" fill="#0B0F19" />
-                        
-                        <!-- Growth Arrow Beak -->
                         <path d="M 148 50 L 175 25 M 175 25 L 163 25 M 175 25 L 175 37" stroke="#F5A623" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"/>
-                        
-                        <!-- Geometric Body (Teal) -->
                         <path d="M 90 70 C 110 50, 130 60, 125 90 C 115 120, 85 130, 75 105 Z" fill="#0F7B5F" stroke="#FFFFFF" stroke-width="1.5"/>
                         <path d="M 75 105 L 95 135 L 70 120 Z" fill="#0D654D" stroke="#FFFFFF" stroke-width="1.5"/>
                         <path d="M 70 120 L 55 145 L 80 130 Z" fill="#0A523F" stroke="#FFFFFF" stroke-width="1.5"/>
-                        
-                        <!-- Animated Geometric Wings -->
                         <g class="finch-wing-animated">
                             <path d="M 100 70 L 65 30 L 85 65 Z" fill="#10B981" stroke="#FFFFFF" stroke-width="1.5"/>
                             <path d="M 85 65 L 50 38 L 75 80 Z" fill="#0F7B5F" stroke="#FFFFFF" stroke-width="1.5"/>
@@ -194,7 +177,7 @@ if not st.session_state.get("user"):
                 </div>
             </div>
             """
-            st.markdown(finch_svg_html, unsafe_allow_html=True)
+            components.html(finch_svg_html, height=180)
             
             st.markdown("<h1 style='text-align:center;'>FINCH <span class='beta-badge'>PILOT v2.3</span></h1>", unsafe_allow_html=True)
             st.markdown("<p style='text-align:center;color:#94a3b8;font-size:1.1rem;margin-bottom:30px;'>"
