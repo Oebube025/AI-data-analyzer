@@ -10,8 +10,9 @@ import numpy as np
 
 
 def parse_numeric_series(series: pd.Series) -> pd.Series:
+    """Safely converts currency/formatted text (e.g. '₦1,200', '$500', '(500)') into numeric values."""
     if pd.api.types.is_numeric_dtype(series):
-        return pd.to_numeric(series, errors="coerce").fillna(0.0)
+        return pd.to_numeric(series, errors="coerce")
     
     def clean_val(v):
         if pd.isna(v):
@@ -38,6 +39,7 @@ def prepare_dataframe(df: pd.DataFrame):
     notes = []
     clean.columns = [str(c).strip() for c in clean.columns]
     
+    # Exclude exact summary/total rows across all columns
     total_mask = pd.Series(False, index=clean.index)
     for col in clean.columns:
         if pd.api.types.is_string_dtype(clean[col]) or clean[col].dtype == object:
@@ -50,6 +52,7 @@ def prepare_dataframe(df: pd.DataFrame):
         clean = clean[~total_mask].reset_index(drop=True)
         notes.append(f"Excluded {dropped_count} summary/total row(s).")
 
+    # 80% threshold date parsing
     for col in clean.columns:
         cl = col.lower()
         if any(w in cl for w in ["date", "time", "created"]) and not any(w in cl for w in ["period", "day", "month", "qty"]):
@@ -66,16 +69,18 @@ def prepare_dataframe(df: pd.DataFrame):
 
 
 def valid_numeric_columns(df: pd.DataFrame) -> list:
+    """Identifies valid numeric columns, allowing snake_case names while avoiding explicit ID tokens."""
     numeric_cols = []
     for c in df.columns:
         cl = c.lower()
-        # Exclude IDs, snake_case IDs, and alphanumeric strings like product names with numbers ("Peak Milk 400g")
-        if re.search(r"\b(id|code|phone|zip|postal|year|sku)\b", cl) or "_" in cl:
+        # Exclude explicit ID, Phone, ZIP, or SKU tokens
+        if re.search(r"\b(customer_id|order_id|user_id|id|code|phone|zip|postal|year|sku)\b", cl):
             continue
-        # Check if the column is predominantly numeric text rather than product descriptions
+            
         parsed = parse_numeric_series(df[c])
         valid_count = parsed.notna().sum()
-        if valid_count > 0 and (valid_count / max(1, len(df))) > 0.5:
+        # Ensure column has numeric values and is not a datetime column
+        if valid_count > 0 and (valid_count / max(1, len(df))) >= 0.3 and not pd.api.types.is_datetime64_any_dtype(df[c]):
             numeric_cols.append(c)
     return numeric_cols
 
@@ -84,7 +89,7 @@ def suggest_columns(df: pd.DataFrame) -> dict:
     sug = {"revenue": None, "cost": None, "category": None, "date": None}
     nums = valid_numeric_columns(df)
     
-    # Priority for revenue: look for sales/revenue/amount headers first, avoiding cost/qty columns
+    # Priority for revenue: look for sales/revenue/amount headers first
     for c in nums:
         cl = c.lower()
         if any(w in cl for w in ["revenue", "sales", "turnover", "amount", "total", "income"]) and "cost" not in cl and "qty" not in cl:

@@ -1,7 +1,7 @@
 """
 Executive Data Intelligence Suite - Streamlit Frontend (App1.py)
-Synchronized to v2.1 with clean splash screen messaging, user-friendly error formatting,
-retail sample data, and secure audit history.
+Direct CSV/XLSX file audits, dynamic financial health verdicts,
+and secure audit history.
 """
 
 import hashlib
@@ -129,18 +129,6 @@ def idx(options, value):
     return options.index(value) if value in options else 0
 
 
-def get_sample_dataframe() -> pd.DataFrame:
-    data = {
-        "Date": ["01/08/2026", "05/08/2026", "10/08/2026", "15/08/2026", "01/09/2026", "10/09/2026", "20/09/2026", "05/10/2026"],
-        "Product": ["Rice (50kg)", "Peak Milk 400g", "Vegetable Oil (25L)", "Frozen Chicken", "Rice (50kg)", "Vegetable Oil (25L)", "Peak Milk 400g", "Frozen Chicken"],
-        "Quantity": [10, 50, 8, 15, 12, 10, 60, 20],
-        "Unit_Price": [45000, 3500, 32000, 5500, 46000, 32500, 3500, 5500],
-        "Total_Amount": [450000, 175000, 256000, 82500, 552000, 325000, 210000, 110000],
-        "Total_Cost": [380000, 130000, 200000, 65000, 450000, 250000, 150000, 85000]
-    }
-    return pd.DataFrame(data)
-
-
 # ----------------------------------------------------------------- AUTH STATE MACHINE
 if not st.session_state.get("user"):
     if "nav_state" not in st.session_state:
@@ -216,41 +204,25 @@ if not st.session_state.get("user"):
 USER = st.session_state["user"]
 USER_EMAIL = get_user_email(USER)
 
-# ------------------------------------------------------------- WORKSPACE & SAMPLE DATA
+# ------------------------------------------------------------- WORKSPACE UPLOAD
 if not check_backend_status(BACKEND_URL, BACKEND_SECRET_KEY):
     st.warning("⚠️ Backend API is waking up or offline. AI advisory may not work yet.")
 
 uploaded = st.file_uploader("📁 Upload your sales or business records (.csv or .xlsx, max 10MB)", type=["csv", "xlsx"])
 
 if uploaded is None:
-    col_a, col_b = st.columns(2)
-    with col_a:
-        if st.button("✨ Try with sample data"):
-            sample_df = get_sample_dataframe()
-            csv_bytes = sample_df.to_csv(index=False).encode("utf-8")
-            st.session_state["sample_upload_bytes"] = csv_bytes
-            st.session_state["sample_filename"] = "retail_store_records.csv"
-            st.rerun()
-    with col_b:
-        sample_df_dl = get_sample_dataframe()
-        st.download_button("📥 Download Sample CSV Template", data=sample_df_dl.to_csv(index=False), file_name="retail_template.csv", mime="text/csv")
-
-    if "sample_upload_bytes" in st.session_state:
-        uploaded_data = st.session_state["sample_upload_bytes"]
-        uploaded_name = st.session_state["sample_filename"]
+    st.info("👋 Please upload your sales or business records above to begin audit.")
+    st.markdown("---")
+    st.subheader("📂 Your Past Saved Audits & History")
+    history_records = load_user_history_db(USER_EMAIL)
+    if history_records:
+        st.dataframe(pd.DataFrame(history_records)[["file_name", "total_revenue", "net_profit", "profit_margin", "timestamp"]], use_container_width=True)
     else:
-        st.info("👋 Upload your business records above, or click **Try with sample data** to test instantly.")
-        st.markdown("---")
-        st.subheader("📂 Your Past Saved Audits & History")
-        history_records = load_user_history_db(USER_EMAIL)
-        if history_records:
-            st.dataframe(pd.DataFrame(history_records)[["file_name", "total_revenue", "net_profit", "profit_margin", "timestamp"]], use_container_width=True)
-        else:
-            st.info("No past audit records found for this account yet.")
-        st.stop()
-else:
-    uploaded_data = uploaded.getvalue()
-    uploaded_name = uploaded.name
+        st.info("No past audit records found for this account yet.")
+    st.stop()
+
+uploaded_data = uploaded.getvalue()
+uploaded_name = uploaded.name
 
 if len(uploaded_data) / (1024 * 1024) > 10:
     st.error("❌ File size exceeds the strict 10MB limit.")
@@ -279,8 +251,7 @@ if st.session_state.get("data_key") != data_key:
     st.session_state.update(data_key=data_key, active_df=clean, prep_notes=notes,
                             suggested=suggest_columns(clean))
     st.session_state.pop("deck_bytes", None)
-    if uploaded is not None:
-        log_tenant_activity(USER_EMAIL, f"Uploaded File: {uploaded_name}", increment_upload=True)
+    log_tenant_activity(USER_EMAIL, f"Uploaded File: {uploaded_name}", increment_upload=True)
 
 df = st.session_state["active_df"]
 notes = st.session_state["prep_notes"]
