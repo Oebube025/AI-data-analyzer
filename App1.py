@@ -1,6 +1,7 @@
 """
 Executive Data Intelligence Suite - Streamlit Frontend (App1.py)
-Splash screen, secure auth with email & username, tenant history, and email-verified admin portal.
+Fail-closed configuration, secure authentication, imported delete_scenarios_db,
+and strict email-verified admin panel.
 """
 
 import hashlib
@@ -19,14 +20,14 @@ import streamlit as st
 
 from analysis import (analyze_dataset, build_ai_payload, prepare_dataframe, suggest_columns,
                       valid_numeric_columns)
-from database import (init_db, load_scenarios_db, save_scenario_db, 
+from database import (init_db, load_scenarios_db, save_scenario_db, delete_scenarios_db,
                       log_tenant_activity, save_feedback_db, 
                       create_user, verify_user, get_user_email,
                       save_audit_history_db, load_user_history_db)
 from deck_builder import create_executive_deck
 from simulator import calculate_scenario, generate_sensitivity_matrix
 
-APP_VERSION = "1.5"
+APP_VERSION = "1.6"
 
 st.set_page_config(page_title="Executive Intelligence Suite | Pilot Beta", page_icon="📊",
                    layout="wide", initial_sidebar_state="expanded")
@@ -62,15 +63,19 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
-def get_required_secret(name: str, default: str = "") -> str:
-    val = st.secrets.get(name, os.getenv(name, default))
+def get_required_secret(name: str) -> str:
+    """Fail closed immediately if a required secret is missing."""
+    val = st.secrets.get(name, os.getenv(name))
+    if not val:
+        st.error(f"❌ Critical Configuration Error: Required secret '{name}' is missing in Streamlit secrets.")
+        st.stop()
     return str(val)
 
 
-BACKEND_URL = get_required_secret("BACKEND_URL", "http://127.0.0.1:8000")
-BACKEND_SECRET_KEY = get_required_secret("BACKEND_SECRET_KEY", "secure-default-key")
-INVITE_CODE = get_required_secret("INVITE_CODE", "demo-beta-2026")
-ADMIN_EMAILS = [e.strip().lower() for e in get_required_secret("ADMIN_EMAILS", "").split(",") if e.strip()]
+BACKEND_URL = get_required_secret("BACKEND_URL")
+BACKEND_SECRET_KEY = get_required_secret("BACKEND_SECRET_KEY")
+INVITE_CODE = get_required_secret("INVITE_CODE")
+ADMIN_EMAILS = [e.strip().lower() for e in get_required_secret("ADMIN_EMAILS").split(",") if e.strip()]
 DB_FILE = st.secrets.get("DB_PATH", os.getenv("DB_PATH", "executive_intelligence.duckdb"))
 
 
@@ -130,7 +135,7 @@ if not st.session_state.get("user"):
         _, col, _ = st.columns([1, 2.5, 1])
         with col:
             st.markdown("<br><br>", unsafe_allow_html=True)
-            st.markdown("<h1 style='text-align:center;'>💼 AI CFO Suite <span class='beta-badge'>PILOT v1.5</span></h1>", unsafe_allow_html=True)
+            st.markdown("<h1 style='text-align:center;'>💼 AI CFO Suite <span class='beta-badge'>PILOT v1.6</span></h1>", unsafe_allow_html=True)
             st.markdown("<p style='text-align:center;color:#94a3b8;font-size:1.1rem;margin-bottom:30px;'>"
                         "Turn messy monthly business records (Excel, QuickBooks, Shopify) into bank-ready financial reports, "
                         "growth scenarios, and automated CFO briefs in 60 seconds.</p>", unsafe_allow_html=True)
@@ -174,7 +179,7 @@ if not st.session_state.get("user"):
                     np2 = st.text_input("Confirm password", type="password")
                     inv = st.text_input("Invite code", type="password")
                     if st.form_submit_button("Create account"):
-                        if INVITE_CODE and not hmac.compare_digest(inv.encode(), INVITE_CODE.encode()):
+                        if not hmac.compare_digest(inv.encode(), INVITE_CODE.encode()):
                             st.error("Invalid invite code.")
                         elif not re.fullmatch(r"[A-Za-z0-9_.-]{3,32}", nu.strip()):
                             st.error("Username must be 3-32 characters: letters, numbers, . _ -")
@@ -276,8 +281,8 @@ if st.sidebar.button("🔒 Log out"):
         del st.session_state[k]
     st.rerun()
 
-# --- EMAIL-VERIFIED ADMIN PANEL CHECK ---
-is_admin = (USER_EMAIL in ADMIN_EMAILS) or (not ADMIN_EMAILS)
+# --- FAIL-CLOSED ADMIN PANEL CHECK ---
+is_admin = (ADMIN_EMAILS and USER_EMAIL in ADMIN_EMAILS)
 if is_admin:
     st.sidebar.markdown("---")
     with st.sidebar.expander("🛠️ Founder Admin Panel"):

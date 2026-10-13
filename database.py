@@ -48,7 +48,6 @@ def init_db():
             )
         """)
         
-        # Base Users table creation
         c.execute("""
             CREATE TABLE IF NOT EXISTS users (
                 username VARCHAR PRIMARY KEY,
@@ -59,11 +58,10 @@ def init_db():
             )
         """)
         
-        # Automatic schema migration: safely add email column if missing from legacy DB files
         try:
             c.execute("ALTER TABLE users ADD COLUMN email VARCHAR")
         except Exception:
-            pass  # Column already exists
+            pass
             
         c.execute("""
             CREATE TABLE IF NOT EXISTS tenants (
@@ -126,7 +124,6 @@ def create_user(username: str, email: str, password: str) -> bool:
 
 
 def verify_user(username_or_email: str, password: str) -> Optional[str]:
-    """Returns the user's canonical username if verified, else None."""
     identifier = username_or_email.strip().lower()
     with _conn() as c:
         row = c.execute("""

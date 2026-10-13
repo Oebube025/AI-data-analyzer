@@ -1,6 +1,6 @@
 """
 FastAPI Backend (main.py) - Executive Intelligence Suite
-Secured with API key enforcement, per-user rate limits, aggregate-only sanitization, and structured error responses.
+Upgraded to Cohere command-a-03-2025, strict API key enforcement, and rate limiting.
 """
 
 import hmac
@@ -16,12 +16,12 @@ from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 
-APP_VERSION = "1.2"
+APP_VERSION = "1.6"
 app = FastAPI(title="Executive Intelligence Backend", version=APP_VERSION)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("uvicorn")
 
-COHERE_MODEL = os.getenv("COHERE_MODEL", "command-r-plus-08-2024")
+COHERE_MODEL = os.getenv("COHERE_MODEL", "command-a-03-2025")
 MAX_BODY_CHARS = 200_000
 
 
@@ -31,40 +31,33 @@ class AIAdvisoryRequest(BaseModel):
 
 
 def require_key(x_api_key: str = Header(None)):
-    expected = os.getenv("BACKEND_SECRET_KEY", "secure-default-key-2026")
+    expected = os.getenv("BACKEND_SECRET_KEY")
+    if not expected:
+        raise HTTPException(status_code=500, detail="Server configuration error: BACKEND_SECRET_KEY is missing.")
     if not x_api_key or not hmac.compare_digest(x_api_key, expected):
         raise HTTPException(status_code=401, detail="Unauthorized: Invalid or missing API key.")
 
 
-# ------------------------------------------------------------ rate limits
 _user_hits = defaultdict(deque)
 _global_hits = deque()
-
-
-def _prune(q: deque, window: float):
-    now = time.time()
-    while q and now - q[0] > window:
-        q.popleft()
 
 
 def check_rate_limit(user: str):
     per_hour = int(os.getenv("AI_RATE_PER_HOUR", "10"))
     daily_cap = int(os.getenv("AI_DAILY_CAP", "500"))
     uq = _user_hits[user]
-    _prune(uq, 3600)
-    _prune(_global_hits, 86400)
-    if len(uq) >= per_hour:
-        raise HTTPException(status_code=429, detail=f"Rate limit reached ({per_hour} reports per hour). Try again later.")
-    if len(_global_hits) >= daily_cap:
-        raise HTTPException(status_code=429, detail="Daily service capacity reached. Try again tomorrow.")
     now = time.time()
+    while uq and now - uq[0] > 3600:
+        uq.popleft()
+    while _global_hits and now - _global_hits[0] > 86400:
+        _global_hits.popleft()
+        
+    if len(uq) >= per_hour:
+        raise HTTPException(status_code=429, detail=f"Rate limit reached ({per_hour} reports per hour).")
+    if len(_global_hits) >= daily_cap:
+        raise HTTPException(status_code=429, detail="Daily service capacity reached.")
     uq.append(now)
     _global_hits.append(now)
-
-
-# ----------------------------------------------------------- sanitization
-def _num(v):
-    return v if isinstance(v, (int, float)) and not isinstance(v, bool) else None
 
 
 def sanitize_stats(stats: dict) -> dict:
@@ -78,7 +71,6 @@ def sanitize_stats(stats: dict) -> dict:
         "leaderboards": stats.get("leaderboards"),
         "concentration": stats.get("concentration"),
         "trend": stats.get("trend"),
-        "anomaly_summary": stats.get("anomaly_summary"),
         "warnings": [str(w)[:300] for w in (stats.get("warnings") or [])[:10]],
     }
 
@@ -89,8 +81,8 @@ def sanitize_scenarios(scenarios: Optional[list]) -> list:
         if isinstance(sc, dict):
             out.append({
                 "scenario_name": str(sc.get("scenario_name", ""))[:80],
-                "revenue": _num(sc.get("revenue")), "costs": _num(sc.get("costs")),
-                "net_profit": _num(sc.get("net_profit")), "margin": _num(sc.get("margin")),
+                "revenue": sc.get("revenue"), "costs": sc.get("costs"),
+                "net_profit": sc.get("net_profit"), "margin": sc.get("margin"),
             })
     return out
 
@@ -124,7 +116,6 @@ def _call_cohere(api_key: str, prompt: str) -> str:
     return resp.message.content[0].text
 
 
-# ----------------------------------------------------------------- routes
 @app.get("/health", dependencies=[Depends(require_key)])
 async def health_check():
     return {"status": "healthy", "service": "Executive Intelligence Backend", "version": APP_VERSION}
@@ -132,9 +123,6 @@ async def health_check():
 
 @app.post("/api/ai-advisory", dependencies=[Depends(require_key)])
 async def generate_ai_advisory(payload: AIAdvisoryRequest, x_user_id: str = Header("anonymous")):
-    if len(json.dumps(payload.model_dump(), default=str)) > MAX_BODY_CHARS:
-        raise HTTPException(status_code=413, detail="Payload too large.")
-
     api_key = os.getenv("COHERE_API_KEY")
     if not api_key:
         raise HTTPException(status_code=503, detail="AI service configuration missing.")
