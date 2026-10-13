@@ -8,6 +8,7 @@ import hashlib
 import hmac
 import io
 import os
+import re
 import time
 import duckdb
 
@@ -74,7 +75,7 @@ BACKEND_URL = get_required_secret("BACKEND_URL")
 BACKEND_SECRET_KEY = get_required_secret("BACKEND_SECRET_KEY")
 INVITE_CODE = get_required_secret("INVITE_CODE")
 ADMIN_EMAILS = [e.strip().lower() for e in get_required_secret("ADMIN_EMAILS").split(",")]
-DB_FILE = secret_db = st.secrets.get("DB_PATH", os.getenv("DB_PATH", "executive_intelligence.duckdb"))
+DB_FILE = st.secrets.get("DB_PATH", os.getenv("DB_PATH", "executive_intelligence.duckdb"))
 
 
 @st.cache_resource
@@ -213,7 +214,6 @@ if st.session_state.get("data_key") != data_key:
     st.session_state.update(data_key=data_key, active_df=clean, prep_notes=notes,
                             suggested=suggest_columns(clean))
     st.session_state.pop("deck_bytes", None)
-    # Increment upload counter ONLY on actual new file uploads
     log_tenant_activity(USER, f"Uploaded File: {uploaded.name}", increment_upload=True)
 
 df = st.session_state["active_df"]
@@ -249,7 +249,6 @@ if st.sidebar.button("🔒 Log out"):
         del st.session_state[k]
     st.rerun()
 
-# --- ADMIN PANEL RESTRICTED EXCLUSIVELY TO ADMIN EMAILS ---
 if USER in ADMIN_EMAILS:
     st.sidebar.markdown("---")
     with st.sidebar.expander("🛠️ Founder Admin Panel"):
