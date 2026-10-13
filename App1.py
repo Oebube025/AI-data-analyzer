@@ -1,7 +1,7 @@
 """
-Executive Data Intelligence Suite - Streamlit Frontend (App1.py)
-Direct CSV/XLSX file audits, dynamic financial health verdicts,
-and secure audit history.
+FINCH - AI Business Intelligence Frontend (App1.py)
+Rebranded to FINCH with integrated logo[cite: 4], animated splash screen, 
+retail data audits, and secure workspace navigation.
 """
 
 import hashlib
@@ -25,12 +25,12 @@ from database import (init_db, load_scenarios_db, save_scenario_db, delete_scena
 from deck_builder import create_executive_deck
 from simulator import calculate_scenario, generate_sensitivity_matrix
 
-APP_VERSION = "2.1"
+APP_VERSION = "2.2"
 
-st.set_page_config(page_title="Executive Intelligence Suite | Pilot Beta", page_icon="📊",
+st.set_page_config(page_title="FINCH | AI Business Intelligence", page_icon="🐦",
                    layout="wide", initial_sidebar_state="expanded")
 
-# --- SIGNATURE DARK GLASSMORPHISM & CLAYMORPHISM STYLING ---
+# --- SIGNATURE DARK GLASSMORPHISM & CLAYMORPHISM STYLING WITH FINCH ANIMATION ---
 st.markdown("""
 <style>
     .stApp { background-color: #0b0f19; color: #f1f5f9; font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; }
@@ -48,15 +48,39 @@ st.markdown("""
     div[data-testid="stMetric"] label { color: #94a3b8 !important; font-weight: 500; font-size: 0.85rem !important; text-transform: uppercase; }
     div[data-testid="stMetric"] [data-testid="stMetricValue"] { color: #f8fafc !important; font-weight: 700; }
     .beta-badge { 
-        background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%); color: #ffffff; 
+        background: linear-gradient(135deg, #0f7b5f 0%, #0d654d 100%); color: #ffffff; 
         font-size: 0.7rem; font-weight: 700; padding: 4px 10px; border-radius: 20px; margin-left: 8px; text-transform: uppercase; 
     }
     h1, h2, h3 { color: #f8fafc; letter-spacing: -0.03em; font-weight: 700; }
     .stButton>button { 
-        background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%); color: white; border: none; border-radius: 12px; 
-        font-weight: 600; padding: 0.6rem 1.2rem; width: 100%; box-shadow: inset 0 2px 4px rgba(255, 255, 255, 0.2), 0 6px 16px rgba(37, 99, 235, 0.4);
+        background: linear-gradient(135deg, #0f7b5f 0%, #0d654d 100%); color: white; border: none; border-radius: 12px; 
+        font-weight: 600; padding: 0.6rem 1.2rem; width: 100%; box-shadow: inset 0 2px 4px rgba(255, 255, 255, 0.2), 0 6px 16px rgba(15, 123, 95, 0.4);
     }
-    .stButton>button:hover { background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%); transform: translateY(-1px); }
+    .stButton>button:hover { background: linear-gradient(135deg, #0d654d 0%, #0a523f 100%); transform: translateY(-1px); }
+
+    /* --- SWOOPING & FLAPPING SPLASH ANIMATION --- */
+    @keyframes swoopIn {
+        0% { transform: translate(-400px, 200px) scale(0.3) rotate(-25deg); opacity: 0; }
+        50% { transform: translate(50px, -30px) scale(1.1) rotate(10deg); opacity: 1; }
+        70% { transform: translate(-20px, 10px) scale(0.95) rotate(-5deg); opacity: 1; }
+        100% { transform: translate(0, 0) scale(1) rotate(0deg); opacity: 1; }
+    }
+    @keyframes flapWings {
+        0%, 100% { transform: translateY(0) scaleY(1); }
+        50% { transform: translateY(-6px) scaleY(0.94); }
+    }
+    .finch-logo-container {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        margin-bottom: 20px;
+    }
+    .finch-animated-logo {
+        width: 220px;
+        border-radius: 24px;
+        box-shadow: 0 20px 40px rgba(0,0,0,0.7);
+        animation: swoopIn 1.4s cubic-bezier(0.25, 1, 0.5, 1) forwards, flapWings 2.5s ease-in-out infinite 1.4s;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -137,16 +161,31 @@ if not st.session_state.get("user"):
     if st.session_state["nav_state"] == "splash":
         _, col, _ = st.columns([1, 2.5, 1])
         with col:
-            st.markdown("<br><br>", unsafe_allow_html=True)
-            st.markdown("<h1 style='text-align:center;'>💼 Executive Intelligence Suite <span class='beta-badge'>PILOT v2.1</span></h1>", unsafe_allow_html=True)
+            st.markdown("<br>", unsafe_allow_html=True)
+            
+            # --- ANIMATED FINCH LOGO EMBED ---
+            logo_path = "finch_logo.png"
+            if not os.path.exists(logo_path):
+                logo_path = "Finch.jpeg"
+            
+            if os.path.exists(logo_path):
+                st.markdown("""
+                    <div class="finch-logo-container">
+                        <img src="app/static/finch_logo.png" class="finch-animated-logo" />
+                    </div>
+                """, unsafe_allow_html=True)
+                # Fallback to Streamlit image if static path needs direct rendering
+                st.image(logo_path, width=220)
+            
+            st.markdown("<h1 style='text-align:center;'>FINCH <span class='beta-badge'>PILOT v2.2</span></h1>", unsafe_allow_html=True)
             st.markdown("<p style='text-align:center;color:#94a3b8;font-size:1.1rem;margin-bottom:30px;'>"
                         "Transform business transaction exports into structured financial reports, "
-                        "growth scenarios, and automated advisory briefs.</p>", unsafe_allow_html=True)
+                        "growth scenarios, and automated AI insights.</p>", unsafe_allow_html=True)
             
             c1, c2, c3 = st.columns(3)
             c1.metric("Audit Speed", "Fast", "Automated")
             c2.metric("Reporting", "8-Slide", "Presentation-Ready")
-            c3.metric("Insights", "AI Advisory", "On-Demand")
+            c3.metric("Insights", "FINCH AI", "On-Demand")
             
             st.markdown("<br>", unsafe_allow_html=True)
             if st.button("🚀 Get Started / Enter Workspace", type="primary"):
@@ -157,7 +196,7 @@ if not st.session_state.get("user"):
     else:
         _, col, _ = st.columns([1, 2, 1])
         with col:
-            st.markdown(f"<br><br><h1 style='text-align:center;'>Secure Access Portal</h1>", unsafe_allow_html=True)
+            st.markdown(f"<br><br><h1 style='text-align:center;'>FINCH Secure Portal</h1>", unsafe_allow_html=True)
             tab_login, tab_signup = st.tabs(["Log in", "Create account"])
 
             with tab_login:
@@ -257,7 +296,7 @@ df = st.session_state["active_df"]
 notes = st.session_state["prep_notes"]
 sug = st.session_state["suggested"]
 
-st.sidebar.markdown("### ⚙️ Workspace Configuration")
+st.sidebar.markdown("### 🐦 FINCH Workspace")
 currency = st.sidebar.selectbox("Currency", ["₦", "$", "€", "£"])
 
 nums = valid_numeric_columns(df)
@@ -307,7 +346,7 @@ if is_admin:
 tabs = st.tabs(["📊 Summary", "📈 Trends", "🔍 Data Check", "🎛️ What-If", "📁 Reports & History"])
 
 with tabs[0]:
-    st.subheader("Executive Summary")
+    st.subheader("FINCH Executive Summary")
     
     profit_val = totals["net_profit"] if cost_known and totals["net_profit"] is not None else 0.0
     margin_val = totals["profit_margin"]
@@ -344,7 +383,7 @@ with tabs[0]:
                          y=[totals["total_revenue"], totals["total_costs"], totals["net_profit"]],
                          title="Financial Overview", labels={"x": "Metric", "y": f"Amount ({currency})"},
                          color=["Revenue", "Costs", "Net Profit"],
-                         color_discrete_map={"Revenue": "#3b82f6", "Costs": "#64748b", "Net Profit": "#10b981"},
+                         color_discrete_map={"Revenue": "#0f7b5f", "Costs": "#64748b", "Net Profit": "#10b981"},
                          template="plotly_dark")
         else:
             fig = px.histogram(df, x=sel_rev, title=f"Distribution of {sel_rev}", template="plotly_dark")
@@ -356,7 +395,7 @@ with tabs[0]:
             bar_df = pd.DataFrame(list(rbc.items())[:8], columns=["Category", "Revenue"]).sort_values("Revenue", ascending=True)
             fig_bar = px.bar(bar_df, x="Revenue", y="Category", orientation="h",
                              title=f"Top Categories by Revenue",
-                             template="plotly_dark", color_discrete_sequence=["#3b82f6"])
+                             template="plotly_dark", color_discrete_sequence=["#0f7b5f"])
             fig_bar.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
             st.plotly_chart(fig_bar, use_container_width=True)
         else:
@@ -453,14 +492,14 @@ with tabs[3]:
         st.plotly_chart(fig_heat, use_container_width=True)
 
 with tabs[4]:
-    st.subheader("Reports, AI Advisor & History")
+    st.subheader("Reports, FINCH AI Advisor & History")
     
     col_rep1, col_rep2 = st.columns(2)
     with col_rep1:
-        st.markdown("### 🧠 AI Business Advisor")
+        st.markdown("### 🧠 FINCH AI Advisor")
         consent = st.checkbox("I understand aggregated figures are sent to AI. Raw rows are never sent.")
-        if st.button("Get AI CFO Brief", type="primary", disabled=not consent):
-            with st.spinner("🤖 Analyzing verified facts and scenarios..."):
+        if st.button("Get AI Brief", type="primary", disabled=not consent):
+            with st.spinner("🐦 FINCH is analyzing verified facts and scenarios..."):
                 try:
                     res_ai = requests.post(
                         f"{BACKEND_URL}/api/ai-advisory",
@@ -487,8 +526,8 @@ with tabs[4]:
                     st.error(f"Connection error: {e}")
 
     with col_rep2:
-        st.markdown("### 📈 Bank-Ready Presentation Deck")
-        st.caption("Generate a professional 8-slide executive PowerPoint presentation.")
+        st.markdown("### 📈 Presentation Deck")
+        st.caption("Generate a professional 8-slide FINCH executive PowerPoint presentation.")
         if st.button("Create PowerPoint Report (.pptx)", type="primary"):
             with st.spinner("📊 Building presentation..."):
                 try:
@@ -501,7 +540,7 @@ with tabs[4]:
                     st.error(f"Error generating presentation: {e}")
         if "deck_bytes" in st.session_state:
             st.download_button("📥 Download Business Report (.pptx)", data=st.session_state["deck_bytes"],
-                               file_name="Business_Report.pptx",
+                               file_name="FINCH_Business_Report.pptx",
                                mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
                                type="primary")
 
