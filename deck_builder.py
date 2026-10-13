@@ -1,13 +1,12 @@
 """
-Executive Deck Builder (deck_builder.py)
-Generates a professional 8-slide bank-ready PowerPoint presentation.
+FINCH Executive Deck Builder (deck_builder.py)
+Generates a professional 8-slide PowerPoint presentation with bulletproof dict formatting.
 """
 
 import io
 from pptx import Presentation
 from pptx.util import Inches, Pt
 from pptx.dml.color import RGBColor
-from pptx.enum.text import PP_ALIGN
 
 
 def create_executive_deck(facts: dict, currency: str = "₦", filename: str = "Financial_Report.xlsx", scenarios: list = None) -> bytes:
@@ -25,7 +24,7 @@ def create_executive_deck(facts: dict, currency: str = "₦", filename: str = "F
     margin = totals.get("profit_margin")
     cost_known = totals.get("cost_known", False)
     concentration = facts.get("concentration", {})
-    leaderboards = facts.get("leaderboards", {})
+    rbc = facts.get("revenue_by_category", {})
     warnings = facts.get("warnings", [])
 
     def add_header(slide, title_text, subtitle_text):
@@ -47,7 +46,7 @@ def create_executive_deck(facts: dict, currency: str = "₦", filename: str = "F
         tb = slide.shapes.add_textbox(Inches(0.8), Inches(7.0), Inches(11.7), Inches(0.3))
         tf = tb.text_frame
         p = tf.paragraphs[0]
-        p.text = f"Executive Intelligence Suite | Source: {filename} | Slide {slide_num} of 8"
+        p.text = f"FINCH Business Intelligence | Source: {filename} | Slide {slide_num} of 8"
         p.font.size = Pt(10)
         p.font.color.rgb = RGBColor(148, 163, 184)
 
@@ -57,13 +56,13 @@ def create_executive_deck(facts: dict, currency: str = "₦", filename: str = "F
     tf1 = tb1.text_frame
     tf1.word_wrap = True
     p = tf1.paragraphs[0]
-    p.text = "Executive Financial Intelligence Brief"
+    p.text = "FINCH Financial Intelligence Brief"
     p.font.size = Pt(40)
     p.font.bold = True
     p.font.color.rgb = RGBColor(15, 23, 42)
     
     p2 = tf1.add_paragraph()
-    p2.text = f"Prepared for SME Audit & Bank Review\nFile: {filename} | Currency: {currency}"
+    p2.text = f"Prepared for SME Audit & Executive Review\nFile: {filename} | Currency: {currency}"
     p2.font.size = Pt(18)
     p2.font.color.rgb = RGBColor(100, 116, 139)
     add_footer(slide1, 1)
@@ -77,7 +76,7 @@ def create_executive_deck(facts: dict, currency: str = "₦", filename: str = "F
     
     bullets = [
         f"Total Verified Revenue: {currency}{rev:,.2f}",
-        f"Total Recorded Costs: {currency}{costs:,.2f}" if cost_known else "Total Recorded Costs: Not provided in dataset",
+        f"Total Recorded Costs: {currency}{costs:,.2f}" if cost_known and costs is not None else "Total Recorded Costs: Not provided in dataset",
         f"Net Profitability: {currency}{profit:,.2f} ({margin:.1f}% margin)" if cost_known and profit is not None else "Net Profitability: n/a (Requires cost column)",
         f"Data Reliability Index: {meta.get('data_health_index', 100)}% (Based on missing cells & duplicates)"
     ]
@@ -108,26 +107,30 @@ def create_executive_deck(facts: dict, currency: str = "₦", filename: str = "F
         else:
             p2.text = f"Warning: The business incurred a net loss of {currency}{abs(profit):,.2f}. Immediate cost rationalization is recommended."
     else:
-        p2.text = "Cost metrics were not explicitly mapped. Establishing a baseline cost ratio (e.g., 70% of revenue) is recommended for accurate forecasting."
+        p2.text = "Cost metrics were not explicitly mapped. Establishing a baseline cost ratio is recommended for accurate forecasting."
     p2.font.size = Pt(16)
     p2.font.color.rgb = RGBColor(71, 85, 105)
     add_footer(slide3, 3)
 
-    # --- Slide 4: Category Leaderboards ---
+    # --- Slide 4: Category Leaderboards (FIXED HERE) ---
     slide4 = prs.slides.add_slide(layout)
     add_header(slide4, "3. Top Performing Categories", "Revenue distribution across product lines and categories.")
     tb4 = slide4.shapes.add_textbox(Inches(0.8), Inches(2.0), Inches(11.7), Inches(4.5))
     tf4 = tb4.text_frame
     tf4.word_wrap = True
     
-    if leaderboards:
+    if rbc:
         p = tf4.paragraphs[0]
         p.text = "Top Revenue Drivers:"
         p.font.size = Pt(18)
         p.font.bold = True
-        for cat, val in list(leaderboards.items())[:5]:
+        for cat, val in list(rbc.items())[:5]:
             p_item = tf4.add_paragraph()
-            p_item.text = f"• {cat}: {currency}{val:,.2f}"
+            try:
+                num_val = float(val)
+                p_item.text = f"• {cat}: {currency}{num_val:,.2f}"
+            except (ValueError, TypeError):
+                p_item.text = f"• {cat}: {val}"
             p_item.font.size = Pt(16)
             p_item.font.color.rgb = RGBColor(51, 65, 85)
             p_item.space_after = Pt(8)
@@ -174,7 +177,7 @@ def create_executive_deck(facts: dict, currency: str = "₦", filename: str = "F
     p2.font.color.rgb = RGBColor(71, 85, 105)
     add_footer(slide6, 6)
 
-    # --- Slide 7: What-If Scenarios & Risks ---
+    # --- Slide 7: Key Risks & Warnings ---
     slide7 = prs.slides.add_slide(layout)
     add_header(slide7, "6. Key Risks & Warnings", "Identified operational risks from dataset audit.")
     tb7 = slide7.shapes.add_textbox(Inches(0.8), Inches(2.0), Inches(11.7), Inches(4.5))
