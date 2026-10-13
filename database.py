@@ -1,7 +1,7 @@
 """
 Persistent storage (database.py): user accounts, saved What-If scenarios,
 tenant activity logs, user audit history, and feedback in DuckDB.
-Contains ZERO Streamlit imports.
+Contains automatic schema migration and ZERO Streamlit imports.
 """
 
 import contextlib
@@ -11,6 +11,7 @@ import json
 import os
 import secrets
 import datetime
+from typing import Optional
 
 import duckdb
 import pandas as pd
@@ -46,16 +47,24 @@ def init_db():
                 created_at TIMESTAMP DEFAULT current_timestamp
             )
         """)
-        # Users table now explicitly stores email
+        
+        # Base Users table creation
         c.execute("""
             CREATE TABLE IF NOT EXISTS users (
                 username VARCHAR PRIMARY KEY,
-                email VARCHAR NOT NULL,
+                email VARCHAR,
                 salt VARCHAR NOT NULL,
                 pw_hash VARCHAR NOT NULL,
                 created_at TIMESTAMP DEFAULT current_timestamp
             )
         """)
+        
+        # Automatic schema migration: safely add email column if missing from legacy DB files
+        try:
+            c.execute("ALTER TABLE users ADD COLUMN email VARCHAR")
+        except Exception:
+            pass  # Column already exists
+            
         c.execute("""
             CREATE TABLE IF NOT EXISTS tenants (
                 email VARCHAR PRIMARY KEY,
@@ -135,7 +144,7 @@ def verify_user(username_or_email: str, password: str) -> Optional[str]:
 def get_user_email(username: str) -> str:
     with _conn() as c:
         row = c.execute("SELECT email FROM users WHERE username = ?", [username.strip().lower()]).fetchone()
-    return row[0] if row else username
+    return row[0] if row and row[0] else username
 
 
 def log_tenant_activity(email: str, action: str, increment_upload: bool = False):
