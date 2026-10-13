@@ -1,6 +1,7 @@
 """
 FINCH - AI Business Intelligence Frontend (App1.py)
-Renders finch_logo.jpeg with Base64 encoding and smooth swooping/flapping CSS animations.
+Rebranded to FINCH with isolated cropped bird logo (`finch_bird_only.png`) 
+and smooth CSS swooping/flapping animations.
 """
 
 import base64
@@ -26,7 +27,7 @@ from database import (init_db, load_scenarios_db, save_scenario_db, delete_scena
 from deck_builder import create_executive_deck
 from simulator import calculate_scenario, generate_sensitivity_matrix
 
-APP_VERSION = "2.5"
+APP_VERSION = "2.6"
 
 st.set_page_config(page_title="FINCH | AI Business Intelligence", page_icon="🐦",
                    layout="wide", initial_sidebar_state="expanded")
@@ -132,7 +133,7 @@ def idx(options, value):
 
 def get_base64_image(image_path: str) -> str:
     """Safely loads image and returns base64 string."""
-    for path in [image_path, "finch_logo.jpeg", "Finch_2.jpeg", "Finch.jpeg"]:
+    for path in [image_path, "finch_bird_only.png", "finch_logo.jpeg", "Finch_2.jpeg"]:
         if os.path.exists(path):
             with open(path, "rb") as img_file:
                 return base64.b64encode(img_file.read()).decode("utf-8")
@@ -147,8 +148,8 @@ if not st.session_state.get("user"):
     if st.session_state["nav_state"] == "splash":
         _, col, _ = st.columns([1, 2.5, 1])
         with col:
-            # --- BASE64 ANIMATED EMBED OF finch_logo.jpeg ---
-            b64_img = get_base64_image("finch_logo.jpeg")
+            # --- BASE64 ANIMATED EMBED OF CROPPED BIRD LOGO (`finch_bird_only.png`) ---
+            b64_img = get_base64_image("finch_bird_only.png")
             
             if b64_img:
                 animated_logo_html = f"""
@@ -165,18 +166,16 @@ if not st.session_state.get("user"):
                             50% {{ transform: translateY(-8px) scaleY(0.94); }}
                         }}
                         .finch-anim-img {{
-                            width: 290px;
-                            border-radius: 16px;
-                            box-shadow: 0 16px 36px rgba(0, 0, 0, 0.65);
+                            width: 200px;
                             animation: flyInSwoop 1.5s cubic-bezier(0.22, 1, 0.36, 1) forwards, wingFlap 2.2s ease-in-out infinite 1.5s;
                         }}
                     </style>
-                    <img src="data:image/jpeg;base64,{b64_img}" class="finch-anim-img" alt="FINCH Logo" />
+                    <img src="data:image/png;base64,{b64_img}" class="finch-anim-img" alt="FINCH Bird Logo" />
                 </div>
                 """
-                components.html(animated_logo_html, height=210)
+                components.html(animated_logo_html, height=180)
             
-            st.markdown("<h1 style='text-align:center;'>FINCH <span class='beta-badge'>PILOT v2.5</span></h1>", unsafe_allow_html=True)
+            st.markdown("<h1 style='text-align:center;'>FINCH <span class='beta-badge'>PILOT v2.6</span></h1>", unsafe_allow_html=True)
             st.markdown("<p style='text-align:center;color:#94a3b8;font-size:1.1rem;margin-bottom:30px;'>"
                         "Transform business transaction exports into structured financial reports, "
                         "growth scenarios, and automated AI insights.</p>", unsafe_allow_html=True)
