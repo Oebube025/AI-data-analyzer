@@ -1,6 +1,6 @@
 """
 finch_intro.py  -  animated Finch bird for Streamlit.
-Updated with app background color (#0b0f19) and banner/portal integration.
+Removes replay button, adds periodic wing-flapping every 10 seconds after landing.
 """
 import streamlit as st
 import streamlit.components.v1 as components
@@ -23,11 +23,6 @@ _HTML = """<!DOCTYPE html>
   #arrow { transform-box:fill-box; transform-origin:0% 100%; }
   #arrow.pop { animation:pop .7s cubic-bezier(.3,1.6,.5,1); }
   @keyframes pop { 0%{transform:scale(1)} 40%{transform:scale(1.22) rotate(-4deg)} 100%{transform:scale(1)} }
-  button { position:absolute; left:50%; bottom:10px; transform:translateX(-50%);
-           background:transparent; color:#EFA94E; border:1.5px solid #EFA94E; border-radius:999px;
-           padding:6px 16px; font-size:12px; cursor:pointer; opacity:0; transition:opacity .5s;
-           display:__BTN__; }
-  button.show { opacity:1; }
 </style></head>
 <body class="__MARKER__">
 <div class="ring"></div><div class="ring r2"></div>
@@ -53,14 +48,13 @@ _HTML = """<!DOCTYPE html>
     <circle cx="788" cy="205" r="7" fill="#0A1A33"/>
   </svg>
 </div>
-<button id="replay">Replay Animation</button>
 <script>
 (function () {
   var bird = document.getElementById('bird'), wing = document.getElementById('wing'),
-      arrow = document.getElementById('arrow'), btn = document.getElementById('replay'),
-      rings = document.querySelectorAll('.ring');
+      arrow = document.getElementById('arrow'), rings = document.querySelectorAll('.ring');
   var reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   var DURATION = 3.4, W, H, size, bh, start = null, last = 0, phase = 0, landed = false, started = false;
+  var lastFlapTime = 0, flappingTimer = 0, isFlapping = false;
 
   function layout() {
     W = window.innerWidth; H = window.innerHeight;
@@ -77,14 +71,15 @@ _HTML = """<!DOCTYPE html>
   function setWing(d) { wing.setAttribute('transform', 'rotate(' + d + ' 710 236)'); }
   function land() {
     landed = true;
+    lastFlapTime = Date.now();
     arrow.classList.remove('pop'); void arrow.getBoundingClientRect(); arrow.classList.add('pop');
     rings.forEach(function (r) { r.classList.remove('go'); void r.offsetWidth; r.classList.add('go'); });
-    btn.classList.add('show');
   }
   function frame(ts) {
     if (start === null) { start = ts; last = ts; }
     var dt = Math.min((ts - last) / 1000, 0.05); last = ts;
     var t = (ts - start) / 1000, p = Math.min(t / DURATION, 1);
+    
     if (p < 1) {
       var e = 1 - Math.pow(1 - p, 2.2), a = pos(e), b = pos(Math.min(e + 0.01, 1));
       var heading = Math.atan2(b[1]-a[1], b[0]-a[0]) * 180 / Math.PI;
@@ -97,15 +92,33 @@ _HTML = """<!DOCTYPE html>
     } else {
       if (!landed) land();
       place(W * 0.5, H * 0.5 + Math.sin(t * 2.2) * 3, 0);
-      setWing(0);
+      
+      // Periodic wing flap every 10 seconds for 1.5 seconds
+      var now = Date.now();
+      if (!isFlapping && now - lastFlapTime >= 10000) {
+        isFlapping = true;
+        flappingTimer = now;
+      }
+      if (isFlapping) {
+        var elapsedFlap = (now - flappingTimer) / 1000;
+        if (elapsedFlap < 1.5) {
+          phase += 2 * Math.PI * 10 * dt;
+          setWing(Math.sin(phase) * 22);
+        } else {
+          isFlapping = false;
+          lastFlapTime = now;
+          setWing(0);
+        }
+      } else {
+        setWing(0);
+      }
     }
     requestAnimationFrame(frame);
   }
   function go() {
-    layout(); start = reduce ? -1e9 : null; phase = 0; landed = false; btn.classList.remove('show');
+    layout(); start = reduce ? -1e9 : null; phase = 0; landed = false;
     if (!started) { started = true; requestAnimationFrame(frame); }
   }
-  btn.addEventListener('click', go);
   window.addEventListener('resize', layout);
   go();
 })();
@@ -114,7 +127,7 @@ _HTML = """<!DOCTYPE html>
 
 
 def show_finch_intro(mode: str = "splash", height: int = 240, bg: str = "#0b0f19") -> None:
-    """Render the animated Finch bird with app matching background (#0b0f19)."""
+    """Render the animated Finch bird without a replay button."""
     if mode == "splash":
         if st.session_state.get("_finch_intro_done"):
             return
@@ -137,6 +150,5 @@ def show_finch_intro(mode: str = "splash", height: int = 240, bg: str = "#0b0f19
         html = _HTML.replace("__BTN__", "none")
         components.html(html.replace("__BG__", bg).replace("__MARKER__", _MARKER), height=1)
     else:
-        html = _HTML.replace("__BTN__", "block")
-        components.html(html.replace("__BG__", bg).replace("__MARKER__", "finch-banner"),
+        components.html(_HTML.replace("__BG__", bg).replace("__MARKER__", "finch-banner"),
                         height=height, scrolling=False)
