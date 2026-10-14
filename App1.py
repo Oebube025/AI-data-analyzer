@@ -1,10 +1,8 @@
 """
 FINCH - AI Business Intelligence Frontend (App1.py)
-Rebranded to FINCH (v2.9) featuring the exact SVG bird asset (`finch_bird.svg`) 
-with smooth CSS swooping entry and wing-flapping animation.
+Integrated with `finch_intro.py` for the cinematic full-screen splash animation.
 """
 
-import base64
 import hashlib
 import hmac
 import io
@@ -16,7 +14,6 @@ import pandas as pd
 import plotly.express as px
 import requests
 import streamlit as st
-import streamlit.components.v1 as components
 
 from analysis import (analyze_dataset, build_ai_payload, prepare_dataframe, suggest_columns,
                       valid_numeric_columns)
@@ -26,11 +23,15 @@ from database import (init_db, load_scenarios_db, save_scenario_db, delete_scena
                       save_audit_history_db, load_user_history_db)
 from deck_builder import create_executive_deck
 from simulator import calculate_scenario, generate_sensitivity_matrix
+from finch_intro import show_finch_intro
 
-APP_VERSION = "2.9"
+APP_VERSION = "2.10"
 
 st.set_page_config(page_title="FINCH | AI Business Intelligence", page_icon="🐦",
                    layout="wide", initial_sidebar_state="expanded")
+
+# --- CINEMATIC INTRO SPLASH SCREEN (PLAYS ONCE PER SESSION) ---
+show_finch_intro(mode="splash")
 
 # --- SIGNATURE DARK GLASSMORPHISM STYLING ---
 st.markdown("""
@@ -131,72 +132,18 @@ def idx(options, value):
     return options.index(value) if value in options else 0
 
 
-def get_base64_svg(svg_path: str) -> str:
-    """Safely loads SVG file and returns base64 string."""
-    for path in [svg_path, "finch_bird.svg", "finch_logo.jpeg"]:
-        if os.path.exists(path):
-            with open(path, "rb") as f:
-                return base64.b64encode(f.read()).decode("utf-8")
-    return ""
-
-
 # ----------------------------------------------------------------- AUTH STATE MACHINE
 if not st.session_state.get("user"):
     if "nav_state" not in st.session_state:
-        st.session_state["nav_state"] = "splash"
+        st.session_state["nav_state"] = "portal"
 
-    if st.session_state["nav_state"] == "splash":
-        _, col, _ = st.columns([1, 2.5, 1])
-        with col:
-            # --- EXACT SVG BIRD WITH SWOOP & WING FLAP ANIMATION ---
-            b64_svg = get_base64_svg("finch_bird.svg")
-            
-            if b64_svg:
-                animated_logo_html = f"""
-                <div style="display: flex; justify-content: center; align-items: center; width: 100%; padding: 10px 0;">
-                    <style>
-                        @keyframes flyInSwoop {{
-                            0% {{ transform: translate(-350px, -120px) scale(0.2) rotate(-35deg); opacity: 0; }}
-                            50% {{ transform: translate(35px, 15px) scale(1.1) rotate(10deg); opacity: 1; }}
-                            75% {{ transform: translate(-8px, -4px) scale(0.95) rotate(-4deg); opacity: 1; }}
-                            100% {{ transform: translate(0, 0) scale(1) rotate(0deg); opacity: 1; }}
-                        }}
-                        @keyframes wingFlap {{
-                            0%, 100% {{ transform: translateY(0) scaleY(1); }}
-                            50% {{ transform: translateY(-7px) scaleY(0.93); }}
-                        }}
-                        .finch-svg-container {{
-                            width: 260px;
-                            animation: flyInSwoop 1.5s cubic-bezier(0.22, 1, 0.36, 1) forwards, wingFlap 2.2s ease-in-out infinite 1.5s;
-                        }}
-                    </style>
-                    <div class="finch-svg-container">
-                        <img src="data:image/svg+xml;base64,{b64_svg}" alt="FINCH Bird Logo" style="width: 100%; height: auto;" />
-                    </div>
-                </div>
-                """
-                components.html(animated_logo_html, height=200)
-            
-            st.markdown("<h1 style='text-align:center;'>FINCH <span class='beta-badge'>PILOT v2.9</span></h1>", unsafe_allow_html=True)
-            st.markdown("<p style='text-align:center;color:#94a3b8;font-size:1.1rem;margin-bottom:30px;'>"
-                        "Transform business transaction exports into structured financial reports, "
-                        "growth scenarios, and automated AI insights.</p>", unsafe_allow_html=True)
-            
-            c1, c2, c3 = st.columns(3)
-            c1.metric("Audit Speed", "Fast", "Automated")
-            c2.metric("Reporting", "8-Slide", "Presentation-Ready")
-            c3.metric("Insights", "FINCH AI", "On-Demand")
-            
-            st.markdown("<br>", unsafe_allow_html=True)
-            if st.button("🚀 Get Started / Enter Workspace", type="primary"):
-                st.session_state["nav_state"] = "auth"
-                st.rerun()
-        st.stop()
-
-    else:
+    if st.session_state["nav_state"] == "portal":
         _, col, _ = st.columns([1, 2, 1])
         with col:
-            st.markdown(f"<br><br><h1 style='text-align:center;'>FINCH Secure Portal</h1>", unsafe_allow_html=True)
+            st.markdown(f"<br><br><h1 style='text-align:center;'>FINCH <span class='beta-badge'>PILOT v2.10</span></h1>", unsafe_allow_html=True)
+            st.markdown("<p style='text-align:center;color:#94a3b8;font-size:1rem;margin-bottom:20px;'>"
+                        "Transform business transaction exports into structured financial reports.</p>", unsafe_allow_html=True)
+            
             tab_login, tab_signup = st.tabs(["Log in", "Create account"])
 
             with tab_login:
@@ -235,9 +182,6 @@ if not st.session_state.get("user"):
                             st.rerun()
                         else:
                             st.error("That username or email is already taken.")
-            if st.button("← Back to Welcome Screen"):
-                st.session_state["nav_state"] = "splash"
-                st.rerun()
         st.stop()
 
 USER = st.session_state["user"]
