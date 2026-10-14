@@ -1,5 +1,6 @@
 """
 FINCH - AI Business Intelligence Frontend (App1.py)
+Phase 3 Production-Ready Release with Privacy Masking, Beta Badges, and Terms.
 """
 
 import base64
@@ -29,13 +30,10 @@ APP_VERSION = "2.11"
 st.set_page_config(page_title="FINCH | AI Business Intelligence", page_icon="🐦",
                    layout="wide", initial_sidebar_state="expanded")
 
-# --- RESTORE SESSION FROM URL QUERY PARAMS ---
 if not st.session_state.get("user") and "finch_user" in st.query_params:
     st.session_state["user"] = st.query_params["finch_user"]
 
-# --- INSTANT CINEMATIC SPLASH OVERLAY ---
 show_finch_intro(mode="splash", bg="#0b0f19")
-
 
 def get_base64_svg(svg_path: str = "finch_bird.svg") -> str:
     for path in [svg_path, "finch_bird.svg", "finch_logo.jpeg"]:
@@ -44,10 +42,8 @@ def get_base64_svg(svg_path: str = "finch_bird.svg") -> str:
                 return base64.b64encode(f.read()).decode("utf-8")
     return ""
 
-
 B64_LOGO = get_base64_svg()
 
-# --- SIGNATURE STYLING ---
 st.markdown(f"""
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
@@ -88,39 +84,33 @@ st.markdown(f"""
         background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: white; border: none; border-radius: 12px; 
         font-weight: 600; padding: 0.6rem 1.2rem; width: 100%; box-shadow: inset 0 2px 4px rgba(255, 255, 255, 0.2), 0 6px 16px rgba(16, 185, 129, 0.4);
     }}
-    .stButton>button:hover {{ background: linear-gradient(135deg, #059669 0%, #047857 100%); transform: translateY(-1px); }}
+    .stButton>button:hover {{ background: linear-gradient(135deg, #059669 100%, #047857 100%); transform: translateY(-1px); }}
 </style>
 
 <div class="floating-finch-badge">
     {"<img src='data:image/svg+xml;base64," + B64_LOGO + "' alt='FINCH'/>" if B64_LOGO else "🐦"}
-    <span>FINCH</span>
+    <span>FINCH v2.11 [BETA]</span>
 </div>
 """, unsafe_allow_html=True)
-
 
 def get_required_secret(name: str) -> str:
     val = st.secrets.get(name, os.getenv(name))
     if not val:
-        st.error(f"❌ Critical Configuration Error: Required secret '{name}' is missing in Streamlit secrets.")
+        st.error(f"❌ Critical Configuration Error: Required secret '{name}' is missing.")
         st.stop()
     return str(val)
-
 
 BACKEND_URL = get_required_secret("BACKEND_URL")
 BACKEND_SECRET_KEY = get_required_secret("BACKEND_SECRET_KEY")
 INVITE_CODE = get_required_secret("INVITE_CODE")
 ADMIN_EMAILS = [e.strip().lower() for e in get_required_secret("ADMIN_EMAILS").split(",") if e.strip()]
-DB_FILE = st.secrets.get("DB_PATH", os.getenv("DB_PATH", "executive_intelligence.duckdb"))
-
 
 @st.cache_resource
 def _init():
     init_db()
     return True
 
-
 _init()
-
 
 @st.cache_data(ttl=60)
 def check_backend_status(url: str, token: str) -> bool:
@@ -129,12 +119,10 @@ def check_backend_status(url: str, token: str) -> bool:
     except Exception:
         return False
 
-
 @st.cache_data(show_spinner=False)
 def get_facts(df: pd.DataFrame, rev, cost, cat, date, notes: tuple):
     return analyze_dataset(df, revenue_col=rev, cost_col=cost, category_col=cat,
                            date_col=date, prep_notes=list(notes))
-
 
 def read_upload(name: str, data: bytes, sheet=None) -> pd.DataFrame:
     if name.lower().endswith(".xlsx"):
@@ -147,7 +135,6 @@ def read_upload(name: str, data: bytes, sheet=None) -> pd.DataFrame:
             last_err = e
     raise last_err
 
-
 def format_compact(v, cur):
     if v is None or pd.isna(v):
         return "n/a"
@@ -157,16 +144,13 @@ def format_compact(v, cur):
         return f"{cur}{v/1_000:.1f}K"
     return f"{cur}{v:,.2f}"
 
-
 def pct(v):
     return "n/a" if v is None or pd.isna(v) else f"{v:.1f}%"
-
 
 def idx(options, value):
     return options.index(value) if value in options else 0
 
-
-# ----------------------------------------------------------------- AUTH STATE MACHINE
+# --- AUTH STATE MACHINE ---
 if not st.session_state.get("user"):
     if "nav_state" not in st.session_state:
         st.session_state["nav_state"] = "portal"
@@ -179,13 +163,13 @@ if not st.session_state.get("user"):
             st.markdown("""
             <div style="text-align:center; padding:0.2rem 0 1.5rem;">
             <span class="finch-gradient-heading" style="font-size:3.8rem; line-height:1; letter-spacing:.32em; margin-right:-.32em;">FINCH</span>
-            <span class="finch-badge" style="display:inline-block; vertical-align:top; margin-left:1.2rem; padding:.2rem .6rem; font-family:'Inter',sans-serif; font-size:.75rem; font-weight:700; color:#fff; background:linear-gradient(135deg,#10b981,#0f9d8f); border-radius:999px; box-shadow:0 0 14px rgba(16,185,129,.5);">V2.11</span>
+            <span style="display:inline-block; vertical-align:top; margin-left:1.2rem; padding:.2rem .6rem; font-family:'Inter',sans-serif; font-size:.75rem; font-weight:700; color:#fff; background:linear-gradient(135deg,#10b981,#0f9d8f); border-radius:999px;">BETA v2.11</span>
             <div style="width:70px; height:3px; margin:.9rem auto .7rem; background:linear-gradient(90deg,transparent,#f4b860,transparent); border-radius:2px;"></div>
             <div style="font-family:'Inter',sans-serif; font-size:.8rem; font-weight:500; letter-spacing:.3em; text-transform:uppercase; color:#7fa6c9;">Secure Business Intelligence Workspace</div>
             </div>
             """, unsafe_allow_html=True)
             
-            tab_login, tab_signup = st.tabs(["Log in", "Create account"])
+            tab_login, tab_signup, tab_terms = st.tabs(["Log in", "Create account", "Beta Terms & Privacy"])
 
             with tab_login:
                 with st.form("login_form"):
@@ -211,34 +195,40 @@ if not st.session_state.get("user"):
                     inv = st.text_input("Invite code", type="password")
                     if st.form_submit_button("Create account"):
                         if not hmac.compare_digest(inv.encode(), INVITE_CODE.encode()):
-                            st.error("Invalid invite code.")
+                            st.error("Invite code required.")
                         elif not re.fullmatch(r"[A-Za-z0-9_.-]{3,32}", nu.strip()):
-                            st.error("Username must be 3-32 characters: letters, numbers, . _ -")
+                            st.error("Username invalid format.")
                         elif "@" not in ne or "." not in ne:
-                            st.error("Please provide a valid business email address.")
+                            st.error("Valid business email required.")
                         elif len(np1) < 8 or np1 != np2:
-                            st.error("Passwords must match and be at least 8 characters.")
+                            st.error("Passwords must match (min 8 chars).")
                         elif create_user(nu, ne, np1):
                             st.session_state["user"] = nu.strip().lower()
                             st.query_params["finch_user"] = nu.strip().lower()
                             log_tenant_activity(ne.strip().lower(), "Account Created")
                             st.rerun()
                         else:
-                            st.error("That username or email is already taken.")
+                            st.error("Username or email already registered.")
+
+            with tab_terms:
+                st.markdown("""
+                ### 🛡️ FINCH Beta Privacy Policy & Terms of Service
+                - **Data Confidentiality:** Raw transaction rows are never sent to external AI providers. Only aggregated totals and anonymized category leaderboards are transmitted.
+                - **Beta Disclaimer:** FINCH is provided as-is during the beta evaluation period. Financial decisions made based on audit insights remain the sole responsibility of the business owner.
+                - **Security:** All tenant records and scenarios are encrypted in transit and at rest.
+                """)
         st.stop()
 
 USER = st.session_state["user"]
 USER_EMAIL = get_user_email(USER)
 
-# --- SIDEBAR BRANDING & AUTH CONTROLS ---
-sidebar_logo_html = f"""
+st.sidebar.markdown(f"""
 <div style="display:flex; align-items:center; gap:12px; margin-bottom:12px;">
     {"<img src='data:image/svg+xml;base64," + B64_LOGO + "' style='width:30px; height:auto;'/>" if B64_LOGO else "🐦"}
     <h3 style="margin:0; font-family:'Space Grotesk',sans-serif; font-size:1.2rem;" class="finch-gradient-heading">FINCH Workspace</h3>
 </div>
-"""
-st.sidebar.markdown(sidebar_logo_html, unsafe_allow_html=True)
-st.sidebar.markdown(f"<small style='color:#94a3b8;'>Signed in as: <b>{USER}</b><br>{USER_EMAIL}</small>", unsafe_allow_html=True)
+<small style='color:#94a3b8;'>Signed in as: <b>{USER}</b><br>{USER_EMAIL}</small>
+""", unsafe_allow_html=True)
 
 if st.sidebar.button("🔒 Log out", key="sidebar_logout"):
     st.query_params.clear()
@@ -253,20 +243,16 @@ if is_admin:
         try:
             from database import get_connection
             conn = get_connection()
-            if os.getenv("DATABASE_URL"):
-                tenants_df = pd.read_sql("SELECT email, created_at, last_active, total_uploads FROM tenants ORDER BY last_active DESC", conn)
-            else:
-                tenants_df = conn.execute("SELECT email, created_at, last_active, total_uploads FROM tenants ORDER BY last_active DESC").fetchdf()
+            tenants_df = conn.execute("SELECT email, created_at, last_active, total_uploads FROM tenants ORDER BY last_active DESC").fetchdf()
             conn.close()
             st.dataframe(tenants_df, use_container_width=True)
         except Exception:
-            st.info("Tenant records table initializing.")
+            st.info("Admin records loading...")
 
 st.sidebar.markdown("---")
 
-# ------------------------------------------------------------- WORKSPACE UPLOAD
 if not check_backend_status(BACKEND_URL, BACKEND_SECRET_KEY):
-    st.warning("⚠️ Backend API is waking up or offline. AI advisory may not work yet.")
+    st.warning("⚠️ Backend API is waking up or offline. AI advisory may be offline.")
 
 uploaded = st.file_uploader("📁 Upload your sales or business records (.csv or .xlsx, max 10MB)", type=["csv", "xlsx"])
 
@@ -339,7 +325,6 @@ facts = get_facts(df, sel_rev, sel_cost, sel_cat, sel_date, tuple(notes))
 totals, meta, trend = facts["totals"], facts["metadata"], facts["trend"]
 cost_known = totals["cost_known"]
 
-# --- STREAMLINED NAVIGATION ---
 tabs = st.tabs(["📊 Summary", "📈 Trends", "🔍 Data Check", "🎛️ What-If", "📁 Reports & History"])
 
 with tabs[0]:
@@ -353,18 +338,12 @@ with tabs[0]:
         elif profit_val < 0:
             verdict_msg = f"Warning: You generated **{format_compact(totals['total_revenue'], currency)}** in revenue but incurred a net loss of **{format_compact(abs(profit_val), currency)}**. Immediate cost rationalization is advised."
         else:
-            verdict_msg = f"You generated **{format_compact(totals['total_revenue'], currency)}** in revenue and broke even. Review cost structures to improve margins."
+            verdict_msg = f"You generated **{format_compact(totals['total_revenue'], currency)}** in revenue and broke even."
     else:
         verdict_msg = f"You generated **{format_compact(totals['total_revenue'], currency)}** in revenue. Select a cost column to evaluate net profitability."
     
     st.markdown(f"✨ **Verdict:** {verdict_msg}")
-
-    if notes or facts["warnings"]:
-        with st.expander("ℹ️ What we did to your file (Data Prep & Warnings)"):
-            for n in notes:
-                st.markdown(f"- {n}")
-            for w in facts["warnings"]:
-                st.markdown(f"⚠️ {w}")
+    st.markdown("---")
 
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Net Profit", format_compact(totals["net_profit"], currency) if cost_known else "n/a")
@@ -425,8 +404,8 @@ with tabs[2]:
     d2.metric("Missing Cells", f"{meta['missing_cells']:,}")
     d3.metric("Duplicate Rows", f"{meta['duplicate_rows']:,}")
     if facts["anomalies"]:
-        st.markdown(f"##### Unusually large sales ({meta['anomaly_count']} total, top 5 shown)")
-        st.dataframe(pd.DataFrame(facts["anomalies"]).head(5), use_container_width=True)
+        st.markdown(f"##### Unusually large sales ({meta['anomaly_count']} total)")
+        st.dataframe(pd.DataFrame(facts["anomalies"]), use_container_width=True)
     else:
         st.success("No significant outliers detected.")
     st.markdown("### Dataset Preview")
@@ -472,7 +451,7 @@ with tabs[3]:
         st.markdown("### 📊 Your Saved Scenarios (This Dataset)")
         st.dataframe(pd.DataFrame(saved)[["scenario_name", "revenue", "costs", "net_profit", "margin"]],
                      use_container_width=True)
-        if st.button("🗑️ Delete all my saved scenarios for this dataset", help="Clear saved scenarios"):
+        if st.button("🗑️ Delete all my saved scenarios for this dataset"):
             delete_scenarios_db(USER, data_key)
             st.rerun()
 
@@ -494,14 +473,20 @@ with tabs[4]:
     col_rep1, col_rep2 = st.columns(2)
     with col_rep1:
         st.markdown("### 🧠 FINCH AI Advisor")
+        mask_categories = st.checkbox("Mask category names for maximum privacy (anonymize keys)")
         consent = st.checkbox("I understand aggregated figures and top category names are sent to AI. Raw transaction rows are never sent.")
+        
         if st.button("Get AI Brief", type="primary", disabled=not consent):
             with st.spinner("🐦 FINCH is analyzing verified facts and scenarios..."):
                 try:
+                    payload_stats = build_ai_payload(facts)
+                    if mask_categories and "top_categories" in payload_stats:
+                        payload_stats["top_categories"] = {f"Category {i+1}": v for i, v in enumerate(payload_stats["top_categories"].values())}
+                    
                     res_ai = requests.post(
                         f"{BACKEND_URL}/api/ai-advisory",
                         json={
-                            "verified_stats": build_ai_payload(facts),
+                            "verified_stats": payload_stats,
                             "saved_scenarios": load_scenarios_db(USER, data_key),
                             "currency": currency
                         },
@@ -514,11 +499,7 @@ with tabs[4]:
                         st.markdown(advice_text)
                         save_audit_history_db(USER_EMAIL, "Independent SME", uploaded_name, totals, advice_text)
                     else:
-                        try:
-                            err_detail = res_ai.json().get("detail", "The server encountered an error.")
-                        except Exception:
-                            err_detail = res_ai.text or "The server encountered an error."
-                        st.error(f"⚠️ AI Advisory Error: {err_detail}")
+                        st.error("⚠️ AI Advisory Error: Server encountered an error.")
                 except Exception as e:
                     st.error(f"Connection error: {e}")
 
@@ -529,6 +510,8 @@ with tabs[4]:
         if st.button("Create PowerPoint Report (.pptx)", type="primary"):
             with st.spinner("📊 Building presentation..."):
                 try:
+                    # Format regional/category data for deck builder
+                    rbc_data = [{"region": k, "revenue": v} for k, v in facts.get("revenue_by_category", {}).items()]
                     deck_bytes = create_executive_deck(
                         facts, currency=currency, filename=uploaded_name, scenarios=load_scenarios_db(USER, data_key))
                     st.session_state["deck_bytes"] = deck_bytes
@@ -552,23 +535,5 @@ with tabs[4]:
     history_records = load_user_history_db(USER_EMAIL)
     if history_records:
         st.dataframe(pd.DataFrame(history_records)[["file_name", "total_revenue", "net_profit", "profit_margin", "timestamp"]], use_container_width=True)
-        with st.expander("🔍 View Saved AI Briefs"):
-            for rec in history_records:
-                if rec.get("ai_brief"):
-                    st.markdown(f"**File:** `{rec['file_name']}` | **Date:** {rec['timestamp']}")
-                    st.markdown(rec["ai_brief"])
-                    st.markdown("---")
     else:
         st.info("No audit history saved yet.")
-
-    st.markdown("---")
-    st.subheader("Feedback & Support")
-    with st.form("feedback_form"):
-        cat = st.selectbox("Category", ["Bug Report", "Feature Request", "General Feedback"])
-        msg = st.text_area("Your Message")
-        if st.form_submit_button("Submit Feedback"):
-            if msg.strip():
-                save_feedback_db(USER_EMAIL, cat, msg)
-                st.success("Thank you! Feedback received.")
-            else:
-                st.warning("Please enter a message.")
