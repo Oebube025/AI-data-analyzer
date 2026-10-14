@@ -1,0 +1,3585 @@
+diff -urN a/.streamlit/secrets.toml.example b/.streamlit/secrets.toml.example
+--- a/.streamlit/secrets.toml.example	1970-01-01 01:00:00.000000000 +0100
++++ b/.streamlit/secrets.toml.example	2026-10-15 00:21:54.723160940 +0100
+@@ -0,0 +1,6 @@
++# Copy to .streamlit/secrets.toml (never commit the real file)
++BACKEND_URL = "https://your-backend.example.com"
++BACKEND_SECRET_KEY = "a-long-random-string-shared-with-the-backend"
++INVITE_CODE = "choose-something-only-your-pilot-users-know"
++ADMIN_EMAILS = "you@yourbusiness.com"
++SUPPORT_CONTACT = "WhatsApp 080xxxxxxx or support@yourbusiness.com"   # shown on the Forgot-password tab
+diff -urN a/App1.py b/App1.py
+--- a/App1.py	2026-10-15 00:21:54.719138743 +0100
++++ b/App1.py	2026-10-15 00:21:54.721497252 +0100
+@@ -1,12 +1,21 @@
+ """
+-FINCH - AI Business Intelligence Frontend (App1.py)
+-Phase 3 Production-Ready Release with Privacy Masking, Beta Badges, and Terms.
++FINCH - AI Business Intelligence Frontend (App1.py) v2.12
++
++Security / trust fixes vs v2.11
++- Removed the "?finch_user=<name>" URL login (anyone could open someone else's account).
++  Sessions are now random expiring tokens stored hashed in the database.
++- Login throttling, password rules, password reset with one-time codes.
++- "Mask category names" now really masks them (and is covered by tests).
++- Honest terms (no false "encrypted at rest" claim), delete-my-data and download-my-data.
++- Sample data button, visible "how we read your file" line, visible data warnings,
++  neutral verdict wording, elasticity-aware what-if, stale-deck protection.
+ """
+ 
+ import base64
+ import hashlib
+ import hmac
+ import io
++import json
+ import os
+ import re
+ 
+@@ -15,48 +24,57 @@
+ import requests
+ import streamlit as st
+ 
+-from analysis import (analyze_dataset, build_ai_payload, prepare_dataframe, suggest_columns,
++from analysis import (analyze_dataset, build_ai_payload, parse_numeric_series, prepare_dataframe, suggest_columns,
+                       valid_numeric_columns)
+-from database import (init_db, load_scenarios_db, save_scenario_db, delete_scenarios_db,
+-                      log_tenant_activity, save_feedback_db, 
+-                      create_user, verify_user, get_user_email,
+-                      save_audit_history_db, load_user_history_db)
++from database import (backup_database, create_reset_code, create_session, create_user, delete_scenarios_db,
++                      delete_session, delete_user_data, export_user_data, get_session_user, get_tenants_overview,
++                      get_user_email, init_db, load_scenarios_db, load_user_history_db, log_tenant_activity,
++                      login_locked, password_problem, redeem_reset_code, save_audit_history_db,
++                      save_feedback_db, save_scenario_db, verify_user)
+ from deck_builder import create_executive_deck
+-from simulator import calculate_scenario, generate_sensitivity_matrix
+ from finch_intro import show_finch_intro
++from sample_data import get_sample_dataframe
++from simulator import calculate_scenario, generate_sensitivity_matrix
+ 
+-APP_VERSION = "2.11"
++APP_VERSION = "2.12"
++SAMPLE_NAME = "sample_shop_data.csv"
++EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+ 
+ st.set_page_config(page_title="FINCH | AI Business Intelligence", page_icon="🐦",
+                    layout="wide", initial_sidebar_state="expanded")
+ 
+-if not st.session_state.get("user") and "finch_user" in st.query_params:
+-    st.session_state["user"] = st.query_params["finch_user"]
++# --- Session restore (random expiring token; a username in the URL is never trusted) ---
++if "finch_user" in st.query_params:  # legacy v2.11 parameter: ignore and remove
++    del st.query_params["finch_user"]
++if not st.session_state.get("user"):
++    _token = st.query_params.get("s")
++    _user = get_session_user(_token) if _token else None
++    if _user:
++        st.session_state["user"], st.session_state["session_token"] = _user, _token
+ 
+ show_finch_intro(mode="splash", bg="#0b0f19")
+ 
+-def get_base64_svg(svg_path: str = "finch_bird.svg") -> str:
+-    for path in [svg_path, "finch_bird.svg", "finch_logo.jpeg"]:
++
++def get_logo_src() -> str:
++    for path, mime in (("finch_bird.svg", "image/svg+xml"), ("finch_logo.jpeg", "image/jpeg")):
+         if os.path.exists(path):
+             with open(path, "rb") as f:
+-                return base64.b64encode(f.read()).decode("utf-8")
++                return f"data:{mime};base64," + base64.b64encode(f.read()).decode("utf-8")
+     return ""
+ 
+-B64_LOGO = get_base64_svg()
++
++LOGO_SRC = get_logo_src()
++LOGO_IMG = f"<img src='{LOGO_SRC}' alt='FINCH'/>" if LOGO_SRC else "🐦"
+ 
+ st.markdown(f"""
+ <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+ <style>
+     .stApp {{ background-color: #0b0f19; color: #f1f5f9; font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; }}
+     section[data-testid="stSidebar"] {{ background-color: #050811; border-right: 1px solid rgba(30, 41, 59, 0.6); }}
+-
+     .floating-finch-badge {{
+-        position: fixed; top: 18px; right: 24px; z-index: 99999;
+-        display: flex; align-items: center; gap: 8px;
+-        background: rgba(15, 23, 42, 0.75); border: 1px solid rgba(30, 41, 59, 0.8);
+-        backdrop-filter: blur(12px); padding: 6px 14px; border-radius: 999px;
+-        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5), inset 0 1px 1px rgba(255,255,255,0.1);
+-        pointer-events: none;
++        position: fixed; top: 18px; right: 24px; z-index: 99999; display: flex; align-items: center; gap: 8px;
++        background: rgba(15, 23, 42, 0.75); border: 1px solid rgba(30, 41, 59, 0.8); backdrop-filter: blur(12px);
++        padding: 6px 14px; border-radius: 999px; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5); pointer-events: none;
+     }}
+     .floating-finch-badge img {{ width: 22px; height: auto; }}
+     .floating-finch-badge span {{
+@@ -64,7 +82,6 @@
+         background: linear-gradient(110deg,#0f9d8f 0%,#5eead4 50%,#f4b860 100%);
+         -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+     }}
+-
+     .finch-gradient-heading {{
+         font-family: 'Space Grotesk', sans-serif; font-weight: 700; letter-spacing: -0.01em;
+         background: linear-gradient(110deg, #0f9d8f 0%, #5eead4 30%, #f4b860 60%, #5eead4 80%, #0f9d8f 100%);
+@@ -72,27 +89,24 @@
+         animation: finch-shine 8s linear infinite; display: inline-block;
+     }}
+     @keyframes finch-shine {{ to {{ background-position: 200% center; }} }}
+-
++    @media (prefers-reduced-motion: reduce) {{ .finch-gradient-heading {{ animation: none; }} }}
+     div[data-testid="stMetric"] {{
+-        background: linear-gradient(145deg, #162032, #101726);
+-        border: 1px solid rgba(71, 85, 105, 0.4); padding: 20px; border-radius: 16px;
+-        box-shadow: inset 0 2px 4px rgba(255, 255, 255, 0.05), 0 12px 28px rgba(0, 0, 0, 0.5);
++        background: linear-gradient(145deg, #162032, #101726); border: 1px solid rgba(71, 85, 105, 0.4);
++        padding: 20px; border-radius: 16px; box-shadow: 0 12px 28px rgba(0, 0, 0, 0.5);
+     }}
+     div[data-testid="stMetric"] label {{ color: #94a3b8 !important; font-weight: 500; font-size: 0.85rem !important; text-transform: uppercase; }}
+     div[data-testid="stMetric"] [data-testid="stMetricValue"] {{ color: #f8fafc !important; font-weight: 700; }}
+-    .stButton>button {{ 
+-        background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: white; border: none; border-radius: 12px; 
+-        font-weight: 600; padding: 0.6rem 1.2rem; width: 100%; box-shadow: inset 0 2px 4px rgba(255, 255, 255, 0.2), 0 6px 16px rgba(16, 185, 129, 0.4);
++    .stButton>button {{
++        background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: white; border: none; border-radius: 12px;
++        font-weight: 600; padding: 0.6rem 1.2rem; width: 100%; box-shadow: 0 6px 16px rgba(16, 185, 129, 0.35);
+     }}
+-    .stButton>button:hover {{ background: linear-gradient(135deg, #059669 100%, #047857 100%); transform: translateY(-1px); }}
++    .stButton>button:hover {{ background: linear-gradient(135deg, #059669 0%, #047857 100%); transform: translateY(-1px); }}
++    .stButton>button:disabled {{ background: #1e293b; color: #64748b; box-shadow: none; }}
+ </style>
+-
+-<div class="floating-finch-badge">
+-    {"<img src='data:image/svg+xml;base64," + B64_LOGO + "' alt='FINCH'/>" if B64_LOGO else "🐦"}
+-    <span>FINCH v2.11 [BETA]</span>
+-</div>
++<div class="floating-finch-badge">{LOGO_IMG}<span>FINCH v{APP_VERSION} [BETA]</span></div>
+ """, unsafe_allow_html=True)
+ 
++
+ def get_required_secret(name: str) -> str:
+     val = st.secrets.get(name, os.getenv(name))
+     if not val:
+@@ -100,18 +114,23 @@
+         st.stop()
+     return str(val)
+ 
++
+ BACKEND_URL = get_required_secret("BACKEND_URL")
+ BACKEND_SECRET_KEY = get_required_secret("BACKEND_SECRET_KEY")
+ INVITE_CODE = get_required_secret("INVITE_CODE")
+ ADMIN_EMAILS = [e.strip().lower() for e in get_required_secret("ADMIN_EMAILS").split(",") if e.strip()]
++SUPPORT_CONTACT = str(st.secrets.get("SUPPORT_CONTACT", os.getenv("SUPPORT_CONTACT", "the FINCH team")))
++
+ 
+ @st.cache_resource
+ def _init():
+     init_db()
+     return True
+ 
++
+ _init()
+ 
++
+ @st.cache_data(ttl=60)
+ def check_backend_status(url: str, token: str) -> bool:
+     try:
+@@ -119,10 +138,11 @@
+     except Exception:
+         return False
+ 
++
+ @st.cache_data(show_spinner=False)
+ def get_facts(df: pd.DataFrame, rev, cost, cat, date, notes: tuple):
+-    return analyze_dataset(df, revenue_col=rev, cost_col=cost, category_col=cat,
+-                           date_col=date, prep_notes=list(notes))
++    return analyze_dataset(df, revenue_col=rev, cost_col=cost, category_col=cat, date_col=date, prep_notes=list(notes))
++
+ 
+ def read_upload(name: str, data: bytes, sheet=None) -> pd.DataFrame:
+     if name.lower().endswith(".xlsx"):
+@@ -135,143 +155,225 @@
+             last_err = e
+     raise last_err
+ 
++
+ def format_compact(v, cur):
+     if v is None or pd.isna(v):
+         return "n/a"
+     if abs(v) >= 1_000_000:
+-        return f"{cur}{v/1_000_000:.1f}M"
++        return f"{cur}{v / 1_000_000:.1f}M"
+     if abs(v) >= 1_000:
+-        return f"{cur}{v/1_000:.1f}K"
++        return f"{cur}{v / 1_000:.1f}K"
+     return f"{cur}{v:,.2f}"
+ 
++
+ def pct(v):
+     return "n/a" if v is None or pd.isna(v) else f"{v:.1f}%"
+ 
++
+ def idx(options, value):
+     return options.index(value) if value in options else 0
+ 
+-# --- AUTH STATE MACHINE ---
+-if not st.session_state.get("user"):
+-    if "nav_state" not in st.session_state:
+-        st.session_state["nav_state"] = "portal"
+ 
+-    if st.session_state["nav_state"] == "portal":
+-        _, col, _ = st.columns([1, 2.2, 1])
+-        with col:
+-            show_finch_intro(mode="banner", height=200, bg="#0b0f19")
+-            
+-            st.markdown("""
+-            <div style="text-align:center; padding:0.2rem 0 1.5rem;">
+-            <span class="finch-gradient-heading" style="font-size:3.8rem; line-height:1; letter-spacing:.32em; margin-right:-.32em;">FINCH</span>
+-            <span style="display:inline-block; vertical-align:top; margin-left:1.2rem; padding:.2rem .6rem; font-family:'Inter',sans-serif; font-size:.75rem; font-weight:700; color:#fff; background:linear-gradient(135deg,#10b981,#0f9d8f); border-radius:999px;">BETA v2.11</span>
+-            <div style="width:70px; height:3px; margin:.9rem auto .7rem; background:linear-gradient(90deg,transparent,#f4b860,transparent); border-radius:2px;"></div>
+-            <div style="font-family:'Inter',sans-serif; font-size:.8rem; font-weight:500; letter-spacing:.3em; text-transform:uppercase; color:#7fa6c9;">Secure Business Intelligence Workspace</div>
+-            </div>
+-            """, unsafe_allow_html=True)
+-            
+-            tab_login, tab_signup, tab_terms = st.tabs(["Log in", "Create account", "Beta Terms & Privacy"])
+-
+-            with tab_login:
+-                with st.form("login_form"):
+-                    u = st.text_input("Username or Email")
+-                    p = st.text_input("Password", type="password")
+-                    if st.form_submit_button("🚀 Log in"):
+-                        verified_user = verify_user(u, p)
+-                        if verified_user:
+-                            st.session_state["user"] = verified_user
+-                            st.query_params["finch_user"] = verified_user
+-                            user_email = get_user_email(verified_user)
+-                            log_tenant_activity(user_email, "User Login")
+-                            st.rerun()
++def start_session(username: str):
++    token = create_session(username)
++    st.session_state["user"], st.session_state["session_token"] = username, token
++    st.query_params["s"] = token
++    log_tenant_activity(get_user_email(username), "Login")
++    st.rerun()
++
++
++def end_session():
++    delete_session(st.session_state.get("session_token") or st.query_params.get("s"))
++    st.query_params.clear()
++    for k in list(st.session_state.keys()):
++        del st.session_state[k]
++    st.rerun()
++
++
++TERMS_MD = """
++### 🛡️ FINCH Beta: Privacy & Terms (plain English)
++**What we store**
++- Your account: username, email and a scrambled (hashed) password.
++- Your saved what-if plans and a history of report totals (and AI briefs you generate).
++- Your uploaded file is read in memory for your session. We do **not** save the file itself.
++
++**What is sent to the AI (a third-party provider, Cohere)**
++- Only totals, revenue per category (with the category names), month-by-month totals and counts.
++- **Never** your individual rows. Tick *Mask category names* to send "Category 1, Category 2…" instead of real names.
++
++**Your control**
++- In the sidebar you can **download everything we hold about you** or **delete your account and all saved data**.
++
++**Please note**
++- FINCH is a beta. Reports are calculated from your file and are **not audited or professional advice**. Check them before making money decisions.
++- The database is stored on our server and is not separately encrypted at rest. Don't put sensitive personal details in product or customer names.
++"""
++
++# --- AUTH ---
++if not st.session_state.get("user"):
++    _, col, _ = st.columns([1, 2.2, 1])
++    with col:
++        show_finch_intro(mode="banner", height=200, bg="#0b0f19")
++        st.markdown(f"""
++        <div style="text-align:center; padding:0.2rem 0 1.5rem;">
++        <span class="finch-gradient-heading" style="font-size:3.8rem; line-height:1; letter-spacing:.32em; margin-right:-.32em;">FINCH</span>
++        <span style="display:inline-block; vertical-align:top; margin-left:1.2rem; padding:.2rem .6rem; font-size:.75rem; font-weight:700; color:#fff; background:linear-gradient(135deg,#10b981,#0f9d8f); border-radius:999px;">BETA v{APP_VERSION}</span>
++        <div style="width:70px; height:3px; margin:.9rem auto .7rem; background:linear-gradient(90deg,transparent,#f4b860,transparent); border-radius:2px;"></div>
++        <div style="font-size:.8rem; font-weight:500; letter-spacing:.3em; text-transform:uppercase; color:#7fa6c9;">Understand your sales and profit</div>
++        </div>
++        """, unsafe_allow_html=True)
++
++        tab_login, tab_signup, tab_reset, tab_terms = st.tabs(["Log in", "Create account", "Forgot password", "Privacy & Terms"])
++
++        with tab_login:
++            with st.form("login_form"):
++                u = st.text_input("Username or Email")
++                p = st.text_input("Password", type="password")
++                if st.form_submit_button("Log in"):
++                    if login_locked(u):
++                        st.error("Too many failed attempts. Wait 15 minutes, or use 'Forgot password'.")
++                    else:
++                        verified = verify_user(u, p)
++                        if verified:
++                            start_session(verified)
++                        elif login_locked(u):
++                            st.error("Too many failed attempts. Wait 15 minutes, or use 'Forgot password'.")
+                         else:
+                             st.error("Invalid username/email or password.")
+ 
+-            with tab_signup:
+-                with st.form("signup_form"):
+-                    nu = st.text_input("Choose username (3-32 letters, numbers, . _ -)")
+-                    ne = st.text_input("Business Email address", placeholder="owner@company.com")
+-                    np1 = st.text_input("Password (min 8 characters)", type="password")
+-                    np2 = st.text_input("Confirm password", type="password")
+-                    inv = st.text_input("Invite code", type="password")
+-                    if st.form_submit_button("Create account"):
+-                        if not hmac.compare_digest(inv.encode(), INVITE_CODE.encode()):
+-                            st.error("Invite code required.")
+-                        elif not re.fullmatch(r"[A-Za-z0-9_.-]{3,32}", nu.strip()):
+-                            st.error("Username invalid format.")
+-                        elif "@" not in ne or "." not in ne:
+-                            st.error("Valid business email required.")
+-                        elif len(np1) < 8 or np1 != np2:
+-                            st.error("Passwords must match (min 8 chars).")
+-                        elif create_user(nu, ne, np1):
+-                            st.session_state["user"] = nu.strip().lower()
+-                            st.query_params["finch_user"] = nu.strip().lower()
+-                            log_tenant_activity(ne.strip().lower(), "Account Created")
+-                            st.rerun()
+-                        else:
+-                            st.error("Username or email already registered.")
++        with tab_signup:
++            with st.form("signup_form"):
++                nu = st.text_input("Choose username (3-32 letters, numbers, . _ -)")
++                ne = st.text_input("Email address", placeholder="owner@yourbusiness.com")
++                np1 = st.text_input("Password (min 8 characters)", type="password")
++                np2 = st.text_input("Confirm password", type="password")
++                inv = st.text_input("Invite code", type="password")
++                agree = st.checkbox("I have read the Privacy & Terms tab")
++                if st.form_submit_button("Create account"):
++                    problem = password_problem(np1, nu)
++                    if not hmac.compare_digest(inv.encode(), INVITE_CODE.encode()):
++                        st.error("Invite code required.")
++                    elif not agree:
++                        st.error("Please read and accept the Privacy & Terms.")
++                    elif not re.fullmatch(r"[A-Za-z0-9_.-]{3,32}", nu.strip()):
++                        st.error("Username invalid format.")
++                    elif not EMAIL_RE.match(ne.strip()):
++                        st.error("Valid email required.")
++                    elif np1 != np2:
++                        st.error("Passwords do not match.")
++                    elif problem:
++                        st.error(problem)
++                    elif create_user(nu, ne, np1):
++                        start_session(nu.strip().lower())
++                    else:
++                        st.error("Username or email already registered.")
+ 
+-            with tab_terms:
+-                st.markdown("""
+-                ### 🛡️ FINCH Beta Privacy Policy & Terms of Service
+-                - **Data Confidentiality:** Raw transaction rows are never sent to external AI providers. Only aggregated totals and anonymized category leaderboards are transmitted.
+-                - **Beta Disclaimer:** FINCH is provided as-is during the beta evaluation period. Financial decisions made based on audit insights remain the sole responsibility of the business owner.
+-                - **Security:** All tenant records and scenarios are encrypted in transit and at rest.
+-                """)
+-        st.stop()
++        with tab_reset:
++            st.caption(f"Message {SUPPORT_CONTACT} to get a one-time reset code (valid for 30 minutes), then enter it here.")
++            with st.form("reset_form"):
++                ri = st.text_input("Username or email")
++                rc = st.text_input("Reset code")
++                rp1 = st.text_input("New password", type="password")
++                rp2 = st.text_input("Confirm new password", type="password")
++                if st.form_submit_button("Set new password"):
++                    if rp1 != rp2:
++                        st.error("Passwords do not match.")
++                    elif password_problem(rp1, ri):
++                        st.error(password_problem(rp1, ri))
++                    elif redeem_reset_code(ri, rc, rp1):
++                        st.success("Password updated. You can log in now.")
++                    else:
++                        st.error("That code is wrong or has expired.")
++
++        with tab_terms:
++            st.markdown(TERMS_MD)
++    st.stop()
+ 
+ USER = st.session_state["user"]
+ USER_EMAIL = get_user_email(USER)
++if not USER_EMAIL:  # account was deleted elsewhere
++    end_session()
+ 
+ st.sidebar.markdown(f"""
+ <div style="display:flex; align-items:center; gap:12px; margin-bottom:12px;">
+-    {"<img src='data:image/svg+xml;base64," + B64_LOGO + "' style='width:30px; height:auto;'/>" if B64_LOGO else "🐦"}
++    <div style="width:30px;">{LOGO_IMG}</div>
+     <h3 style="margin:0; font-family:'Space Grotesk',sans-serif; font-size:1.2rem;" class="finch-gradient-heading">FINCH Workspace</h3>
+ </div>
+ <small style='color:#94a3b8;'>Signed in as: <b>{USER}</b><br>{USER_EMAIL}</small>
+ """, unsafe_allow_html=True)
+ 
+ if st.sidebar.button("🔒 Log out", key="sidebar_logout"):
+-    st.query_params.clear()
+-    for k in list(st.session_state.keys()):
+-        del st.session_state[k]
+-    st.rerun()
++    end_session()
+ 
+-is_admin = (ADMIN_EMAILS and USER_EMAIL in ADMIN_EMAILS)
++is_admin = bool(ADMIN_EMAILS) and USER_EMAIL.lower() in ADMIN_EMAILS
+ if is_admin:
+     with st.sidebar.expander("🛠️ Founder Admin Panel"):
+-        st.success("🔓 Authorized Admin View")
+-        try:
+-            from database import get_connection
+-            conn = get_connection()
+-            tenants_df = conn.execute("SELECT email, created_at, last_active, total_uploads FROM tenants ORDER BY last_active DESC").fetchdf()
+-            conn.close()
+-            st.dataframe(tenants_df, use_container_width=True)
+-        except Exception:
+-            st.info("Admin records loading...")
++        st.dataframe(pd.DataFrame(get_tenants_overview()), use_container_width=True)
++        rid = st.text_input("Reset code for (username or email)", key="admin_reset_id")
++        if st.button("Generate reset code", key="admin_reset_btn") and rid.strip():
++            made = create_reset_code(rid)
++            if made:
++                st.success(f"Give this code to {made[0]} (valid 30 min):")
++                st.code(made[1])
++            else:
++                st.error("No such account.")
++        if st.button("Back up database now", key="admin_backup_btn"):
++            try:
++                st.success(f"Backup saved to: {backup_database()}")
++            except Exception as e:
++                st.error(f"Backup failed: {e}")
++
++with st.sidebar.expander("🔐 My data & privacy"):
++    st.download_button("Download everything FINCH holds about me (JSON)",
++                       data=json.dumps(export_user_data(USER), indent=2), file_name="finch_my_data.json",
++                       mime="application/json", key="dl_my_data")
++    confirm = st.text_input("Type DELETE to erase your account and all saved data", key="confirm_delete")
++    if st.button("Delete my account", disabled=confirm != "DELETE", key="delete_account_btn"):
++        delete_user_data(USER)
++        end_session()
++
++with st.sidebar.expander("💬 Send feedback"):
++    fb = st.text_area("What would make FINCH more useful for your business?", key="fb_text", max_chars=1000)
++    if st.button("Send feedback", key="fb_btn") and fb.strip():
++        save_feedback_db(USER, fb.strip())
++        st.success("Thank you! We read every message.")
+ 
+ st.sidebar.markdown("---")
+ 
+ if not check_backend_status(BACKEND_URL, BACKEND_SECRET_KEY):
+-    st.warning("⚠️ Backend API is waking up or offline. AI advisory may be offline.")
++    st.warning("⚠️ The AI service is waking up or offline. Charts and the PowerPoint still work.")
+ 
++# --- DATA SOURCE: upload or sample ---
+ uploaded = st.file_uploader("📁 Upload your sales or business records (.csv or .xlsx, max 10MB)", type=["csv", "xlsx"])
+-
+-if uploaded is None:
+-    st.info("👋 Please upload your sales or business records above to begin audit.")
++using_sample = False
++if uploaded is not None:
++    st.session_state.pop("use_sample", None)
++    if uploaded.size > 10 * 1024 * 1024:
++        st.error("❌ File size exceeds the 10MB limit.")
++        st.stop()
++    uploaded_data, uploaded_name = uploaded.getvalue(), uploaded.name
++elif st.session_state.get("use_sample"):
++    using_sample = True
++    uploaded_data = get_sample_dataframe().to_csv(index=False).encode("utf-8")
++    uploaded_name = SAMPLE_NAME
++    st.info("👀 You are looking at **sample shop data**. Upload your own file above to see your business.")
++    if st.button("Stop using sample data", key="stop_sample"):
++        st.session_state.pop("use_sample", None)
++        st.session_state.pop("data_key", None)
++        st.rerun()
++else:
++    st.info("👋 Upload your sales records above, or try the sample first. Your file needs a date, a product or category, and an amount.")
++    if st.button("🧪 Try with sample shop data", key="try_sample"):
++        st.session_state["use_sample"] = True
++        st.rerun()
+     st.markdown("---")
+-    st.markdown("<h3 class='finch-gradient-heading'>📂 Your Past Saved Audits & History</h3>", unsafe_allow_html=True)
++    st.markdown("<h3 class='finch-gradient-heading'>📂 Your past reports</h3>", unsafe_allow_html=True)
+     history_records = load_user_history_db(USER_EMAIL)
+     if history_records:
+-        st.dataframe(pd.DataFrame(history_records)[["file_name", "total_revenue", "net_profit", "profit_margin", "timestamp"]], use_container_width=True)
++        st.dataframe(pd.DataFrame(history_records)[["file_name", "total_revenue", "net_profit", "profit_margin", "timestamp"]],
++                     use_container_width=True)
+     else:
+-        st.info("No past audit records found for this account yet.")
+-    st.stop()
+-
+-uploaded_data = uploaded.getvalue()
+-uploaded_name = uploaded.name
+-
+-if len(uploaded_data) / (1024 * 1024) > 10:
+-    st.error("❌ File size exceeds the strict 10MB limit.")
++        st.info("No past reports yet.")
+     st.stop()
+ 
+ sheet = None
+@@ -288,38 +390,37 @@
+     try:
+         raw = read_upload(uploaded_name, uploaded_data, sheet)
+     except Exception as e:
+-        st.error(f"Error parsing file: {e}")
++        st.error(f"Could not read this file: {e}")
+         st.stop()
+     if raw.empty:
+         st.error("The file has no rows.")
+         st.stop()
+     clean, notes = prepare_dataframe(raw)
+-    st.session_state.update(data_key=data_key, active_df=clean, prep_notes=notes,
+-                            suggested=suggest_columns(clean))
++    st.session_state.update(data_key=data_key, active_df=clean, prep_notes=notes, suggested=suggest_columns(clean))
+     st.session_state.pop("deck_bytes", None)
+-    log_tenant_activity(USER_EMAIL, f"Uploaded File: {uploaded_name}", increment_upload=True)
++    if not using_sample:
++        log_tenant_activity(USER_EMAIL, f"Uploaded File: {uploaded_name}", increment_upload=True)
+ 
+-df = st.session_state["active_df"]
+-notes = st.session_state["prep_notes"]
+-sug = st.session_state["suggested"]
++df, notes, sug = st.session_state["active_df"], st.session_state["prep_notes"], st.session_state["suggested"]
+ 
+ currency = st.sidebar.selectbox("Currency", ["₦", "$", "€", "£"])
+ 
+ nums = valid_numeric_columns(df)
+ if not nums:
+-    st.error("No numeric columns were found. Please check that your file has a revenue or amount column.")
++    st.error("No amount column was found. Your file needs a column with numbers such as Amount, Sales or Revenue.")
+     st.stop()
+-cats = [c for c in df.columns if not pd.api.types.is_numeric_dtype(df[c]) or pd.api.types.is_bool_dtype(df[c])]
+-cats = [c for c in cats if not pd.api.types.is_datetime64_any_dtype(df[c])]
++cats = [c for c in df.columns if (not pd.api.types.is_numeric_dtype(df[c]) or pd.api.types.is_bool_dtype(df[c]))
++        and not pd.api.types.is_datetime64_any_dtype(df[c])]
+ 
+-with st.sidebar.expander("🔍 How we read your file (Column Mapping)"):
+-    sel_rev = st.selectbox("Revenue Column", nums, index=idx(nums, sug["revenue"]))
++with st.sidebar.expander("🔍 How we read your file (Column Mapping)", expanded=False):
++    k = data_key[:8]
++    sel_rev = st.selectbox("Revenue Column", nums, index=idx(nums, sug["revenue"]), key=f"rev_{k}")
+     cost_opts = ["None"] + [c for c in nums if c != sel_rev]
+-    sel_cost = st.selectbox("Cost Column", cost_opts, index=idx(cost_opts, sug["cost"]))
++    sel_cost = st.selectbox("Cost Column", cost_opts, index=idx(cost_opts, sug["cost"]), key=f"cost_{k}")
+     cat_opts = ["None"] + cats
+-    sel_cat = st.selectbox("Category / Group Column", cat_opts, index=idx(cat_opts, sug["category"]))
++    sel_cat = st.selectbox("Category / Group Column", cat_opts, index=idx(cat_opts, sug["category"]), key=f"cat_{k}")
+     date_opts = ["None"] + list(df.columns)
+-    sel_date = st.selectbox("Date / Time Column (Optional)", date_opts, index=idx(date_opts, sug["date"]))
++    sel_date = st.selectbox("Date / Time Column (Optional)", date_opts, index=idx(date_opts, sug["date"]), key=f"date_{k}")
+ 
+ facts = get_facts(df, sel_rev, sel_cost, sel_cat, sel_date, tuple(notes))
+ totals, meta, trend = facts["totals"], facts["metadata"], facts["trend"]
+@@ -328,26 +429,33 @@
+ tabs = st.tabs(["📊 Summary", "📈 Trends", "🔍 Data Check", "🎛️ What-If", "📁 Reports & History"])
+ 
+ with tabs[0]:
+-    st.markdown("<h2 class='finch-gradient-heading' style='font-size:2rem; margin-bottom:12px;'>FINCH Executive Summary</h2>", unsafe_allow_html=True)
+-    
+-    profit_val = totals["net_profit"] if cost_known and totals["net_profit"] is not None else 0.0
+-    margin_val = totals["profit_margin"]
++    st.markdown("<h2 class='finch-gradient-heading' style='font-size:2rem; margin-bottom:12px;'>Your business at a glance</h2>", unsafe_allow_html=True)
++    rev_txt = format_compact(totals["total_revenue"], currency)
+     if cost_known:
+-        if profit_val > 0:
+-            verdict_msg = f"You generated **{format_compact(totals['total_revenue'], currency)}** in revenue with **{format_compact(profit_val, currency)}** net profit ({pct(margin_val)} margin). Financial health is stable and profitable."
+-        elif profit_val < 0:
+-            verdict_msg = f"Warning: You generated **{format_compact(totals['total_revenue'], currency)}** in revenue but incurred a net loss of **{format_compact(abs(profit_val), currency)}**. Immediate cost rationalization is advised."
++        profit, margin = totals["net_profit"], totals["profit_margin"]
++        if profit > 0 and margin is not None:
++            verdict = f"You sold **{rev_txt}** and kept **{format_compact(profit, currency)}** as profit. For every {currency}100 you sold, you kept about {currency}{margin:.0f}."
++        elif profit < 0:
++            verdict = f"You sold **{rev_txt}** but spent more than you earned: a loss of **{format_compact(abs(profit), currency)}**. Look at your biggest costs first."
+         else:
+-            verdict_msg = f"You generated **{format_compact(totals['total_revenue'], currency)}** in revenue and broke even."
++            verdict = f"You sold **{rev_txt}** and broke even."
+     else:
+-        verdict_msg = f"You generated **{format_compact(totals['total_revenue'], currency)}** in revenue. Select a cost column to evaluate net profitability."
+-    
+-    st.markdown(f"✨ **Verdict:** {verdict_msg}")
++        verdict = f"You sold **{rev_txt}**. Select a cost column in the sidebar to see your profit."
++    st.markdown(f"✨ **In short:** {verdict}")
++    st.caption(f"Reading your file as: revenue = **{sel_rev}**, cost = **{sel_cost}**, category = **{sel_cat}**, date = **{sel_date}**. "
++               "Wrong? Change it under *How we read your file* in the sidebar.")
++    for n_ in notes + facts["preparation_notes"][len(notes):]:
++        st.caption(f"ℹ️ {n_}")
++    problems = [w for w in facts["warnings"] if not w.startswith("No cost column")]
++    if problems:
++        with st.expander(f"⚠️ Things to check in your file ({len(problems)})", expanded=True):
++            for w in problems:
++                st.warning(w)
+     st.markdown("---")
+ 
+     c1, c2, c3, c4 = st.columns(4)
+     c1.metric("Net Profit", format_compact(totals["net_profit"], currency) if cost_known else "n/a")
+-    c2.metric("Total Revenue", format_compact(totals["total_revenue"], currency))
++    c2.metric("Total Revenue", rev_txt)
+     c3.metric("Total Costs", format_compact(totals["total_costs"], currency) if cost_known else "Not provided")
+     c4.metric("Profit Margin", pct(totals["profit_margin"]))
+     st.markdown("---")
+@@ -357,188 +465,179 @@
+         if cost_known:
+             fig = px.bar(x=["Revenue", "Costs", "Net Profit"],
+                          y=[totals["total_revenue"], totals["total_costs"], totals["net_profit"]],
+-                         title="Financial Overview", labels={"x": "Metric", "y": f"Amount ({currency})"},
++                         title="Money in, money out", labels={"x": "", "y": f"Amount ({currency})"},
+                          color=["Revenue", "Costs", "Net Profit"],
+-                         color_discrete_map={"Revenue": "#10b981", "Costs": "#64748b", "Net Profit": "#059669"},
++                         color_discrete_map={"Revenue": "#10b981", "Costs": "#64748b", "Net Profit": "#f4b860"},
+                          template="plotly_dark")
+         else:
+-            fig = px.histogram(df, x=sel_rev, title=f"Distribution of {sel_rev}", template="plotly_dark")
+-        fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
++            fig = px.histogram(df.assign(_v=parse_numeric_series(df[sel_rev])), x="_v",
++                               title=f"Distribution of {sel_rev}", labels={"_v": sel_rev}, template="plotly_dark")
++        fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", showlegend=False)
+         st.plotly_chart(fig, use_container_width=True)
+     with g2:
+         rbc = facts["revenue_by_category"]
+         if rbc:
+             bar_df = pd.DataFrame(list(rbc.items())[:8], columns=["Category", "Revenue"]).sort_values("Revenue", ascending=True)
+-            fig_bar = px.bar(bar_df, x="Revenue", y="Category", orientation="h",
+-                             title=f"Top Categories by Revenue",
++            fig_bar = px.bar(bar_df, x="Revenue", y="Category", orientation="h", title="What sells best",
+                              template="plotly_dark", color_discrete_sequence=["#10b981"])
+             fig_bar.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
+             st.plotly_chart(fig_bar, use_container_width=True)
++            st.caption(f"Reliance on one product: {facts['concentration']['share']}")
+         else:
+-            st.info("Select a category column to see category distribution.")
++            st.info("Select a category column to see what sells best.")
+ 
+ with tabs[1]:
+-    st.markdown("<h2 class='finch-gradient-heading' style='font-size:2rem; margin-bottom:12px;'>Performance Trends & Leaderboards</h2>", unsafe_allow_html=True)
++    st.markdown("<h2 class='finch-gradient-heading' style='font-size:2rem; margin-bottom:12px;'>Trends & Leaderboards</h2>", unsafe_allow_html=True)
+     if len(trend["points"]) >= 1:
+         tdf = pd.DataFrame(trend["points"])
+         fig_trend = px.line(tdf, x="period", y="revenue", markers=True, template="plotly_dark",
+-                            title=f"Revenue by {trend['granularity']} (chronological)")
++                            title=f"Revenue by {trend['granularity'].lower()}")
+         fig_trend.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
+         st.plotly_chart(fig_trend, use_container_width=True)
+         if trend["change_pct"] is not None:
+-            st.metric(f"Latest {trend['granularity']} vs previous", f"{trend['change_pct']:+.1f}%")
++            st.metric("Latest month vs previous", f"{trend['change_pct']:+.1f}%")
++            st.caption("If the latest month is not finished yet, this comparison can look worse than it is.")
+     elif sel_date == "None":
+         st.info("Select a date column in the sidebar to see trends.")
+     else:
+-        st.info("Not enough dated data to draw a chronological trend.")
+-
++        st.info("Not enough dated data to draw a trend.")
+     if facts["revenue_by_category"]:
+-        gdf = pd.DataFrame(list(facts["revenue_by_category"].items()), columns=["Category", "Revenue"])
+-        st.markdown("#### Category Leaderboard")
+-        st.dataframe(gdf, use_container_width=True)
++        st.markdown("#### Category leaderboard")
++        st.dataframe(pd.DataFrame(list(facts["revenue_by_category"].items()), columns=["Category", "Revenue"]),
++                     use_container_width=True)
+ 
+ with tabs[2]:
+-    st.markdown("<h2 class='finch-gradient-heading' style='font-size:2rem; margin-bottom:12px;'>Data Check: Is Your Data Reliable?</h2>", unsafe_allow_html=True)
++    st.markdown("<h2 class='finch-gradient-heading' style='font-size:2rem; margin-bottom:12px;'>Data Check: Can you trust your records?</h2>", unsafe_allow_html=True)
+     d1, d2, d3 = st.columns(3)
+     d1.metric("Data Quality Score", f"{meta['data_health_index']}%")
+-    d2.metric("Missing Cells", f"{meta['missing_cells']:,}")
++    d2.metric("Empty Cells", f"{meta['missing_cells']:,}")
+     d3.metric("Duplicate Rows", f"{meta['duplicate_rows']:,}")
++    for w in facts["warnings"]:
++        st.warning(w)
+     if facts["anomalies"]:
+-        st.markdown(f"##### Unusually large sales ({meta['anomaly_count']} total)")
+-        st.dataframe(pd.DataFrame(facts["anomalies"]), use_container_width=True)
++        st.markdown(f"##### Unusually large rows ({meta['anomaly_count']} total, showing the biggest)")
++        st.dataframe(pd.DataFrame(facts["anomalies"]).rename(columns={"row_index": "row position"}), use_container_width=True)
+     else:
+-        st.success("No significant outliers detected.")
+-    st.markdown("### Dataset Preview")
++        st.success("No unusually large rows found.")
++    st.markdown("### Preview of the data we used")
+     st.dataframe(df.head(10), use_container_width=True)
+ 
+ with tabs[3]:
+-    st.markdown("<h2 class='finch-gradient-heading' style='font-size:2rem; margin-bottom:12px;'>What-If Scenario & Heatmap Sensitivity Modelling</h2>", unsafe_allow_html=True)
+-    st.caption("Volume changes scale variable costs; fixed costs stay flat; price changes affect revenue only.")
++    st.markdown("<h2 class='finch-gradient-heading' style='font-size:2rem; margin-bottom:12px;'>What-If Planner</h2>", unsafe_allow_html=True)
++    st.caption("Try a change and see the effect on profit. Fixed costs stay flat, variable costs move with sales volume, "
++               "and a higher price is assumed to reduce volume (see 'Advanced').")
+ 
+     sim_totals = dict(totals)
+     cost_assumed = False
+     if not cost_known:
+-        st.warning("⚠️ **Cost column not selected:** Profit and margin calculations below are modelled on assumed cost ratios.")
++        st.warning("⚠️ No cost column selected, so this plan uses an assumed cost ratio.")
+         ratio = st.slider("Assumed total costs as % of revenue", 0, 100, 70)
+         sim_totals["total_costs"] = totals["total_revenue"] * ratio / 100
+         cost_assumed = True
+ 
+     w1, w2 = st.columns(2)
+     with w1:
+-        scenario_name = st.text_input("Scenario Name", value="Scenario 1")
+-        price_adj = st.slider("Price Adjustment (%)", -50, 50, 5)
+-        volume_adj = st.slider("Volume Adjustment (%)", -50, 50, 0)
++        scenario_name = st.text_input("Plan name", value="Plan 1")
++        price_adj = st.slider("Change prices by (%)", -50, 50, 5)
++        volume_adj = st.slider("Change sales volume by (%) before the price effect", -50, 50, 0)
+     with w2:
+-        fixed_share = st.slider("Share of current costs that are fixed (%)", 0, 100, 30) / 100
+-        fixed_change = st.number_input("Fixed Cost Adjustment (absolute)", value=0.0, step=1000.0)
+-        var_pct = st.slider("Variable Cost per-unit Adjustment (%)", -50, 50, 0)
++        fixed_share = st.slider("Share of your costs that are fixed (%)", 0, 100, 30) / 100
++        fixed_change = st.number_input("Change in fixed costs (amount)", value=0.0, step=1000.0)
++        var_pct = st.slider("Change in cost per unit (%)", -50, 50, 0)
++    with st.expander("Advanced: how much do customers react to price?"):
++        elasticity = st.slider("Price sensitivity (0 = customers ignore price, 1.2 = a 10% rise loses about 12% of sales)", 0.0, 3.0, 1.2, 0.1)
+ 
+-    res = calculate_scenario(sim_totals, price_adj, volume_adj, fixed_change, var_pct, fixed_share)
++    res = calculate_scenario(sim_totals, price_adj, volume_adj, fixed_change, var_pct, fixed_share, elasticity)
+     res["cost_assumed"] = cost_assumed
+     s1, s2, s3, s4 = st.columns(4)
+-    s1.metric("Simulated Revenue", format_compact(res["revenue"], currency),
+-              f"{((1 + price_adj / 100) * (1 + volume_adj / 100) - 1) * 100:+.1f}%")
+-    s2.metric("Simulated Costs", format_compact(res["costs"], currency))
+-    s3.metric("Simulated Net Profit", format_compact(res["net_profit"], currency), f"{res['profit_delta']:+,.2f}")
+-    s4.metric("Simulated Margin", pct(res["profit_margin"]))
++    s1.metric("Revenue", format_compact(res["revenue"], currency), f"{res['revenue_change_pct']:+.1f}%")
++    s2.metric("Costs", format_compact(res["costs"], currency))
++    s3.metric("Net Profit", format_compact(res["net_profit"], currency), f"{res['profit_delta']:+,.0f}")
++    s4.metric("Margin", pct(res["profit_margin"]))
++    st.caption(f"Sales volume changes by about {res['volume_change_pct']:+.1f}% in this plan.")
+ 
+-    if st.button("💾 Save Scenario", type="primary"):
++    if st.button("💾 Save this plan", type="primary"):
+         save_scenario_db(USER, scenario_name, data_key, res)
+-        st.success(f"Saved '{scenario_name}' for this dataset.")
++        st.success(f"Saved '{scenario_name}'.")
+ 
+     saved = load_scenarios_db(USER, data_key)
+     if saved:
+-        st.markdown("### 📊 Your Saved Scenarios (This Dataset)")
++        st.markdown("### 📊 Your saved plans (this file)")
+         sdf = pd.DataFrame(saved)
+-        if "profit_margin" in sdf.columns:
+-            sdf["margin"] = sdf["profit_margin"]
+-        
+-        display_cols = [c for c in ["scenario_name", "revenue", "costs", "net_profit", "margin"] if c in sdf.columns]
+-        st.dataframe(sdf[display_cols], use_container_width=True)
+-        
+-        if st.button("🗑️ Delete all my saved scenarios for this dataset"):
++        st.dataframe(sdf[[c for c in ["scenario_name", "revenue", "costs", "net_profit", "margin", "cost_assumed"] if c in sdf.columns]],
++                     use_container_width=True)
++        if st.button("🗑️ Delete my saved plans for this file"):
+             delete_scenarios_db(USER, data_key)
+             st.rerun()
+ 
+     st.markdown("---")
+-    st.markdown("### 📈 Profit Sensitivity Heatmap")
+-    sens_matrix = generate_sensitivity_matrix(sim_totals, fixed_share)
+-    sens_df = pd.DataFrame(sens_matrix)
++    st.markdown("### 📈 Profit map: price change vs volume change")
++    sens_df = pd.DataFrame(generate_sensitivity_matrix(sim_totals, fixed_share, elasticity))
+     if not sens_df.empty:
+-        fig_heat = px.imshow(sens_df.set_index(sens_df.columns[0]),
+-                             color_continuous_midpoint=0, text_auto=",.0f",
+-                             color_continuous_scale="RdYlGn", template="plotly_dark",
+-                             labels=dict(color="Profit"))
++        fig_heat = px.imshow(sens_df.set_index(sens_df.columns[0]), color_continuous_midpoint=0, text_auto=",.0f",
++                             color_continuous_scale="RdYlGn", template="plotly_dark", labels=dict(color="Profit"))
+         fig_heat.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
+         st.plotly_chart(fig_heat, use_container_width=True)
+ 
+ with tabs[4]:
+-    st.markdown("<h2 class='finch-gradient-heading' style='font-size:2rem; margin-bottom:12px;'>Reports, FINCH AI Advisor & History</h2>", unsafe_allow_html=True)
+-    
++    st.markdown("<h2 class='finch-gradient-heading' style='font-size:2rem; margin-bottom:12px;'>Reports & History</h2>", unsafe_allow_html=True)
+     col_rep1, col_rep2 = st.columns(2)
+     with col_rep1:
+         st.markdown("### 🧠 FINCH AI Advisor")
+-        mask_categories = st.checkbox("Mask category names for maximum privacy (anonymize keys)")
+-        consent = st.checkbox("I understand aggregated figures and top category names are sent to AI. Raw transaction rows are never sent.")
+-        
++        mask_categories = st.checkbox("Hide my product/customer names from the AI (send 'Category 1, 2, 3…')")
++        consent = st.checkbox("I understand totals and category figures (not my individual rows) are sent to an AI provider.")
+         if st.button("Get AI Brief", type="primary", disabled=not consent):
+-            with st.spinner("🐦 FINCH is analyzing verified facts and scenarios..."):
++            with st.spinner("🐦 FINCH is reading your numbers..."):
+                 try:
+-                    payload_stats = build_ai_payload(facts)
+-                    if mask_categories and "top_categories" in payload_stats:
+-                        payload_stats["top_categories"] = {f"Category {i+1}": v for i, v in enumerate(payload_stats["top_categories"].values())}
+-                    
+-                    res_ai = requests.post(
++                    r = requests.post(
+                         f"{BACKEND_URL}/api/ai-advisory",
+-                        json={
+-                            "verified_stats": payload_stats,
+-                            "saved_scenarios": load_scenarios_db(USER, data_key),
+-                            "currency": currency
+-                        },
+-                        headers={"X-API-Key": BACKEND_SECRET_KEY, "X-User-Id": USER},
+-                        timeout=120,
+-                    )
+-                    if res_ai.status_code == 200:
+-                        body = res_ai.json()
+-                        advice_text = body.get("advisory", "")
+-                        st.markdown(advice_text)
+-                        save_audit_history_db(USER_EMAIL, "Independent SME", uploaded_name, totals, advice_text)
++                        json={"verified_stats": build_ai_payload(facts, mask=mask_categories),
++                              "saved_scenarios": load_scenarios_db(USER, data_key), "currency": currency},
++                        headers={"X-API-Key": BACKEND_SECRET_KEY, "X-User-Id": USER}, timeout=120)
++                    if r.status_code == 200:
++                        advice = r.json().get("advisory", "")
++                        st.markdown(advice)
++                        st.caption("AI-written from your totals. It can make mistakes. Check important figures yourself.")
++                        if not using_sample:
++                            save_audit_history_db(USER_EMAIL, "Independent SME", uploaded_name, totals, advice)
+                     else:
+-                        st.error("⚠️ AI Advisory Error: Server encountered an error.")
+-                except Exception as e:
+-                    st.error(f"Connection error: {e}")
++                        try:
++                            detail = r.json().get("detail", "")
++                        except Exception:
++                            detail = ""
++                        st.error(f"⚠️ The AI advisor could not answer right now. {detail}")
++                except Exception:
++                    st.error("Could not reach the AI service. Please try again in a moment.")
+ 
+     with col_rep2:
+-        st.markdown("### 📈 Presentation Deck")
+-        st.caption("Generate a professional 8-slide FINCH executive PowerPoint presentation.")
+-        
++        st.markdown("### 📈 PowerPoint report")
++        st.caption("A clean slide deck with your totals, charts, record check, saved plans and next steps.")
++        saved_now = load_scenarios_db(USER, data_key)
++        deck_key = (data_key, sel_rev, sel_cost, sel_cat, sel_date, currency, len(saved_now))
+         if st.button("Create PowerPoint Report (.pptx)", type="primary"):
+             with st.spinner("📊 Building presentation..."):
+                 try:
+-                    # Format regional/category data for deck builder
+-                    rbc_data = [{"region": k, "revenue": v} for k, v in facts.get("revenue_by_category", {}).items()]
+-                    deck_bytes = create_executive_deck(
+-                        facts, currency=currency, filename=uploaded_name, scenarios=load_scenarios_db(USER, data_key))
+-                    st.session_state["deck_bytes"] = deck_bytes
+-                    save_audit_history_db(USER_EMAIL, "Independent SME", uploaded_name, totals, "Generated PowerPoint Deck (.pptx)")
+-                    st.success("✅ Deck generated successfully!")
++                    st.session_state["deck_bytes"] = create_executive_deck(facts, currency=currency, filename=uploaded_name,
++                                                                          scenarios=saved_now)
++                    st.session_state["deck_key"] = deck_key
++                    if not using_sample:
++                        save_audit_history_db(USER_EMAIL, "Independent SME", uploaded_name, totals, "Generated PowerPoint report (.pptx)")
++                    st.success("✅ Report ready!")
+                 except Exception as e:
+-                    st.error(f"Error generating presentation: {e}")
+-        
+-        if st.session_state.get("deck_bytes"):
+-            st.download_button(
+-                "📥 Download Business Report (.pptx)",
+-                data=st.session_state["deck_bytes"],
+-                file_name="FINCH_Business_Report.pptx",
+-                mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+-                type="primary",
+-                key="download_deck_btn"
+-            )
++                    st.error(f"Could not build the presentation: {e}")
++        if st.session_state.get("deck_bytes") and st.session_state.get("deck_key") == deck_key:
++            st.download_button("📥 Download report (.pptx)", data=st.session_state["deck_bytes"],
++                               file_name="FINCH_Business_Report.pptx",
++                               mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
++                               type="primary", key="download_deck_btn")
++        elif st.session_state.get("deck_bytes"):
++            st.info("Your settings changed since this report was made. Create it again to include them.")
+ 
+     st.markdown("---")
+-    st.markdown("<h3 class='finch-gradient-heading'>📂 Dedicated User History & Audit Trail</h3>", unsafe_allow_html=True)
++    st.markdown("<h3 class='finch-gradient-heading'>📂 Your history</h3>", unsafe_allow_html=True)
+     history_records = load_user_history_db(USER_EMAIL)
+     if history_records:
+-        st.dataframe(pd.DataFrame(history_records)[["file_name", "total_revenue", "net_profit", "profit_margin", "timestamp"]], use_container_width=True)
++        st.dataframe(pd.DataFrame(history_records)[["file_name", "total_revenue", "net_profit", "profit_margin", "timestamp"]],
++                     use_container_width=True)
+     else:
+-        st.info("No audit history saved yet.")
+\ No newline at end of file
++        st.info("No saved reports yet.")
+diff -urN a/DEPLOY.md b/DEPLOY.md
+--- a/DEPLOY.md	1970-01-01 01:00:00.000000000 +0100
++++ b/DEPLOY.md	2026-10-15 00:21:54.723190232 +0100
+@@ -0,0 +1,36 @@
++# FINCH v2.12: go-live checklist
++
++## 1. Apply the patch
++Inside your project folder (the one containing App1.py):
++    patch -p1 < finch_v2.12.patch        # or just copy the files from the zip over yours
++    pip install -r requirements.txt
++    python -m pytest -q                  # all tests must pass before you deploy
++
++## 2. Environment / secrets
++Frontend (Streamlit): BACKEND_URL, BACKEND_SECRET_KEY, INVITE_CODE, ADMIN_EMAILS, SUPPORT_CONTACT (optional).
++Backend (FastAPI):    BACKEND_SECRET_KEY (same value), COHERE_API_KEY, optional AI_RATE_PER_HOUR, AI_DAILY_CAP.
++Both:                 FINCH_DB_PATH=/data/finch_v3.duckdb   <- must point at a PERSISTENT disk.
++Optional:             FINCH_SESSION_HOURS (default 72), FINCH_SPLASH=0 (turn the intro animation off).
++
++## 3. Persistent disk + backups (the #1 way to lose customers is to lose their data)
++- Most free hosts wipe local files on every deploy. Mount a persistent volume and set FINCH_DB_PATH to it.
++- DuckDB allows ONE writer process: run the Streamlit app as a single instance (do not scale to 2+ replicas).
++- Back up: log in as admin -> sidebar "Founder Admin Panel" -> "Back up database now" (writes Parquet files
++  under ./backups). Do it weekly at first and copy the folder off the server. Restore with:
++  DuckDB `IMPORT DATABASE 'backups/finch_backup_YYYYmmdd_HHMMSS'`.
++
++## 4. HTTPS and the session link
++Always serve over HTTPS (Streamlit Community Cloud, Render, Railway and Fly do this for you).
++Logged-in browsers keep a random 72-hour token in the page address (?s=...). It is revocable (Log out) and
++useless once expired, but anyone who is sent that exact link while it is valid is logged in. Tell users not to
++share their address bar. When you have time, swap it for a cookie-based session component.
++
++## 5. Password resets (no email server needed yet)
++User messages you -> admin panel -> "Generate reset code" -> send the 8-character code (valid 30 min) -> user uses the
++"Forgot password" tab. Codes are one-time and guess-limited.
++
++## 6. Known limits (be honest with pilot users)
++- AI rate limits live in the backend's memory and reset when it restarts. Fine for a pilot; use Redis later.
++- The database file is not encrypted at rest. The Privacy & Terms tab says so.
++- Have a Nigerian lawyer review the Privacy & Terms text against the Nigeria Data Protection Act 2023 before you charge anyone.
++- Pricing/payment (Paystack/Flutterwave) is not built yet.
+diff -urN a/analysis.py b/analysis.py
+--- a/analysis.py	2026-10-15 00:21:54.719239031 +0100
++++ b/analysis.py	2026-10-15 00:21:54.721458517 +0100
+@@ -1,172 +1,399 @@
+-"""
+-analysis.py - FINCH Data Analysis & Parsing Engine
+-"""
+-import re
+-import pandas as pd
+-import numpy as np
+-
+-FORBIDDEN_COL_PATTERNS = re.compile(r"\b(id|code|zip|phone|status|email|year|month|day|index|ref)\b", re.IGNORECASE)
+-
+-def prepare_dataframe(df: pd.DataFrame):
+-    notes = []
+-    df = df.copy()
+-    df.columns = [str(c).strip() for c in df.columns]
+-    
+-    before_rows = len(df)
+-    df.dropna(how="all", inplace=True)
+-    
+-    if len(df) > 0:
+-        for col in df.columns:
+-            if not pd.api.types.is_numeric_dtype(df[col]):
+-                mask = df[col].astype(str).str.contains(r"^(total|grand total|sum|subtotal)$", case=False, na=False, regex=True)
+-                if mask.any():
+-                    df = df[~mask]
+-                    notes.append(f"Removed {mask.sum()} summary/total row(s) detected in column '{col}'.")
+-                    break
+-
+-    if len(df) < before_rows:
+-        notes.append(f"Removed {before_rows - len(df)} empty/summary rows.")
+-
+-    return df, notes
+-
+-def parse_numeric_series(series: pd.Series) -> pd.Series:
+-    if pd.api.types.is_numeric_dtype(series):
+-        return pd.to_numeric(series, errors="coerce")
+-    
+-    sample = series.dropna().astype(str)
+-    if any(re.search(r"[A-Za-z]", s) for s in sample.head(10)):
+-        return pd.Series([np.nan] * len(series))
+-
+-    cleaned = series.astype(str).str.replace(r"[^\d.,\-]", "", regex=True)
+-    sample_clean = cleaned.dropna().head(20).astype(str)
+-    if any("," in s and "." in s and s.rfind(",") > s.rfind(".") for s in sample_clean):
+-        cleaned = cleaned.str.replace(".", "", regex=False).str.replace(",", ".", regex=False)
+-    else:
+-        cleaned = cleaned.str.replace(",", "", regex=False)
+-        
+-    return pd.to_numeric(cleaned, errors="coerce")
+-
+-def valid_numeric_columns(df: pd.DataFrame) -> list:
+-    valid = []
+-    for col in df.columns:
+-        if FORBIDDEN_COL_PATTERNS.search(col):
+-            continue
+-        parsed = parse_numeric_series(df[col])
+-        if parsed.notna().sum() > 0.2 * len(df):
+-            valid.append(col)
+-    return valid
+-
+-def suggest_columns(df: pd.DataFrame):
+-    nums = valid_numeric_columns(df)
+-    cats = [c for c in df.columns if not pd.api.types.is_numeric_dtype(df[c])]
+-    
+-    rev_col = nums[0] if nums else (df.columns[0] if len(df.columns) > 0 else None)
+-    for c in nums:
+-        if re.search(r"(revenue|sales|amount|total|price|gross|income|paid)", c, re.IGNORECASE):
+-            rev_col = c
+-            break
+-            
+-    cost_col = "None"
+-    for c in nums:
+-        if c != rev_col and re.search(r"(cost|expense|cogs|spend|fee)", c, re.IGNORECASE):
+-            cost_col = c
+-            break
+-            
+-    cat_col = cats[0] if cats else "None"
+-    for c in cats:
+-        if re.search(r"(category|department|region|product|store|client|branch|type)", c, re.IGNORECASE):
+-            cat_col = c
+-            break
+-            
+-    date_col = "None"
+-    for c in df.columns:
+-        if re.search(r"(date|time|period|created|timestamp)", c, re.IGNORECASE):
+-            date_col = c
+-            break
+-            
+-    return {"revenue": rev_col, "cost": cost_col, "category": cat_col, "date": date_col}
+-
+-def analyze_dataset(df: pd.DataFrame, revenue_col: str, cost_col: str, category_col: str, date_col: str, prep_notes: list):
+-    warnings = []
+-    
+-    rev_series = parse_numeric_series(df[revenue_col]) if revenue_col in df.columns else pd.Series([0]*len(df))
+-    total_revenue = float(rev_series.sum())
+-    
+-    cost_known = False
+-    total_costs = 0.0
+-    if cost_col and cost_col != "None" and cost_col in df.columns:
+-        cost_series = parse_numeric_series(df[cost_col])
+-        total_costs = float(cost_series.sum())
+-        cost_known = True
+-        
+-    net_profit = total_revenue - total_costs if cost_known else None
+-    profit_margin = (net_profit / total_revenue * 100) if cost_known and total_revenue > 0 else None
+-    
+-    revenue_by_category = {}
+-    if category_col and category_col != "None" and category_col in df.columns:
+-        cat_df = pd.DataFrame({"category": df[category_col].astype(str), "revenue": rev_series})
+-        grouped = cat_df.groupby("category")["revenue"].sum().sort_values(ascending=False)
+-        revenue_by_category = grouped.to_dict()
+-
+-    anomalies = []
+-    clean_rev = rev_series.dropna()
+-    if len(clean_rev) > 5:
+-        q1 = clean_rev.quantile(0.25)
+-        q3 = clean_rev.quantile(0.75)
+-        iqr = q3 - q1
+-        if iqr > 0:
+-            upper_bound = q3 + (1.5 * iqr)
+-            outlier_df = df[rev_series > upper_bound].copy()
+-            outlier_df["parsed_revenue"] = rev_series[rev_series > upper_bound]
+-            for idx, row in outlier_df.iterrows():
+-                anomalies.append({
+-                    "row_index": int(idx),
+-                    "revenue": float(row["parsed_revenue"]),
+-                    "category": str(row[category_col]) if category_col != "None" and category_col in df.columns else "N/A"
+-                })
+-
+-    trend_points = []
+-    granularity = "None"
+-    change_pct = None
+-    if date_col and date_col != "None" and date_col in df.columns:
+-        try:
+-            dates = pd.to_datetime(df[date_col], errors="coerce", dayfirst=True)
+-            trend_df = pd.DataFrame({"date": dates, "revenue": rev_series}).dropna(subset=["date"])
+-            if not trend_df.empty:
+-                trend_df["period"] = trend_df["date"].dt.to_period("M").astype(str)
+-                monthly = trend_df.groupby("period")["revenue"].sum().reset_index()
+-                trend_points = monthly.to_dict(orient="records")
+-                granularity = "Month"
+-                if len(monthly) >= 2:
+-                    last_val = monthly.iloc[-1]["revenue"]
+-                    prev_val = monthly.iloc[-2]["revenue"]
+-                    if prev_val > 0:
+-                        change_pct = ((last_val - prev_val) / prev_val) * 100
+-        except Exception:
+-            pass
+-
+-    missing_cells = int(df.isna().sum().sum())
+-    duplicate_rows = int(df.duplicated().sum())
+-    total_cells = max(1, len(df) * max(1, len(df.columns)))
+-    
+-    missing_penalty = int((missing_cells / total_cells) * 50)
+-    dup_penalty = int((duplicate_rows / max(1, len(df))) * 50)
+-    data_health_index = max(0, 100 - missing_penalty - dup_penalty)
+-
+-    return {
+-        "totals": {"total_revenue": total_revenue, "total_costs": total_costs, "cost_known": cost_known, "net_profit": net_profit, "profit_margin": profit_margin},
+-        "metadata": {"total_rows": len(df), "data_health_index": data_health_index, "missing_cells": missing_cells, "duplicate_rows": duplicate_rows, "anomaly_count": len(anomalies)},
+-        "trend": {"granularity": granularity, "points": trend_points, "change_pct": change_pct},
+-        "revenue_by_category": revenue_by_category,
+-        "anomalies": anomalies,
+-        "warnings": warnings
+-    }
+-
+-def build_ai_payload(facts: dict) -> dict:
+-    return {
+-        "totals": facts.get("totals", {}),
+-        "metadata": facts.get("metadata", {}),
+-        "revenue_by_category": facts.get("revenue_by_category", {}),
+-        "trend": facts.get("trend", {}),
+-        "anomaly_count": len(facts.get("anomalies", []))
+-    }
+\ No newline at end of file
++"""
++analysis.py - FINCH Data Analysis & Parsing Engine (v2.12)
++
++What changed vs v2.11
++- Strict number parsing: dates ("05/01/2026"), product names ("Peak Milk 400g") and
++  codes are never mistaken for money columns.
++- Column guessing prefers Total/Amount/Revenue over Unit Price, calculates
++  Quantity x Unit Price only when no total column exists, and never picks a Date
++  as the category.
++- Category names are grouped ignoring case/extra spaces ("rice" == "Rice ").
++- Unreadable revenue cells and negative values are reported as warnings.
++- Unknown costs are None (not 0.0), so nothing downstream can show a fake profit.
++- mask_ai_payload() really anonymises category names before anything is sent to the AI.
++"""
++import copy
++import re
++
++import numpy as np
++import pandas as pd
++
++# Column-name patterns. Lookarounds (not \b) so "order_id" and "Unit_Price" split on "_".
++_SEP_L, _SEP_R = r"(?<![a-z0-9])", r"(?![a-z0-9])"
++FORBIDDEN_COL_PATTERNS = re.compile(
++    _SEP_L + r"(id|code|zip|phone|status|email|year|month|day|index|ref|reference|no|num|number|serial|sn)" + _SEP_R,
++    re.IGNORECASE,
++)
++REV_INCLUDE = re.compile(r"revenue|sales|turnover|income|gross|paid|amount|total|takings|proceeds", re.I)
++REV_EXCLUDE = re.compile(
++    r"cost|expense|cogs|spend|qty|quantity|unit|price|rate|discount|tax|vat|profit|margin|balance|change|stock|reorder",
++    re.I,
++)
++PRICE_RE = re.compile(r"price|rate|selling", re.I)
++TOTALISH_RE = re.compile(r"total|amount|revenue|sales", re.I)
++QTY_RE = re.compile(r"qty|quantity|pcs|pieces|units?\s*sold|no\.?\s*of\s*units|volume", re.I)
++COST_RE = re.compile(r"cost|expense|cogs|spend|outgoing", re.I)
++UNIT_COST_RE = re.compile(r"unit|per|each", re.I)
++CAT_NAME_RE = re.compile(
++    r"category|department|region|product|item|store|client|customer|branch|type|service|description|name|"
++    r"particulars|details|channel|location|supplier",
++    re.I,
++)
++DATE_NAME_RE = re.compile(r"date|time|created|timestamp|period", re.I)
++_TOTAL_ROW_RE = r"^(grand\s+total|overall\s+total|sub\s*total|totals?|sum)\s*:?$"
++
++
++# --------------------------------------------------------------------------- parsing
++def parse_numeric_series(series: pd.Series) -> pd.Series:
++    """Parse money-like values strictly. Anything that is not clearly a number becomes NaN.
++
++    Handles: 5000, "5,000", "₦5,000.50", "(1,200)" (negative), "NGN 3000", "1.234,50".
++    Rejects: "05/01/2026", "Rice (50kg)", "400g", "N/A".
++    """
++    if pd.api.types.is_bool_dtype(series):
++        return pd.Series(np.nan, index=series.index)
++    if pd.api.types.is_numeric_dtype(series):
++        return pd.to_numeric(series, errors="coerce").astype("float64")
++    if pd.api.types.is_datetime64_any_dtype(series):
++        return pd.Series(np.nan, index=series.index)
++
++    s = series.astype("string").str.strip()
++    neg = s.str.match(r"^\(.*\)$").fillna(False).to_numpy(dtype=bool)
++    s = s.str.replace(r"^\((.*)\)$", r"\1", regex=True)
++    s = s.str.replace(r"(?i)ngn|usd|eur|gbp|[₦$€£]", "", regex=True).str.replace(r"\s+", "", regex=True)
++    # European style (1.234,50): decide once per column so "999,99" in the same column is read consistently.
++    if s.str.match(r"^-?\d{1,3}(\.\d{3})+,\d+$").fillna(False).any():
++        s = s.str.replace(".", "", regex=False).str.replace(",", ".", regex=False)
++    s = s.str.replace(",", "", regex=False)
++    ok = s.str.fullmatch(r"-?(\d+(\.\d+)?|\.\d+)").fillna(False)
++    out = pd.to_numeric(s.where(ok), errors="coerce").astype("float64")
++    out = pd.Series(np.where(neg, -np.abs(out.to_numpy()), out.to_numpy()), index=series.index)
++    return out
++
++
++def _is_date_like(series: pd.Series, name: str) -> bool:
++    if pd.api.types.is_datetime64_any_dtype(series):
++        return True
++    if pd.api.types.is_numeric_dtype(series):
++        return False
++    if DATE_NAME_RE.search(name):
++        return True
++    sample = series.dropna().astype(str).head(30)
++    if sample.empty:
++        return False
++    parsed = pd.to_datetime(sample, errors="coerce", dayfirst=True, format="mixed")
++    return parsed.notna().mean() >= 0.8
++
++
++def prepare_dataframe(df: pd.DataFrame):
++    """Trim headers, drop empty rows/columns and summary ("Total") rows."""
++    notes = []
++    out = df.copy()
++    out.columns = [str(c).strip() for c in out.columns]
++
++    empty_cols = [c for c in out.columns if out[c].isna().all()]
++    if empty_cols:
++        out = out.drop(columns=empty_cols)
++        notes.append(f"Ignored {len(empty_cols)} empty column(s).")
++
++    before = len(out)
++    out = out.dropna(how="all")
++    if len(out) < before:
++        notes.append(f"Removed {before - len(out)} empty row(s).")
++
++    mask = pd.Series(False, index=out.index)
++    for col in out.columns:
++        if not pd.api.types.is_numeric_dtype(out[col]):
++            cell = out[col].astype("string").str.strip().str.lower()
++            mask = mask | cell.str.match(_TOTAL_ROW_RE).fillna(False)
++    if mask.any():
++        out = out[~mask]
++        notes.append(f"Removed {int(mask.sum())} summary/total row(s) so they are not counted twice.")
++
++    return out.reset_index(drop=True), notes
++
++
++def valid_numeric_columns(df: pd.DataFrame) -> list:
++    valid = []
++    for col in df.columns:
++        if FORBIDDEN_COL_PATTERNS.search(col):
++            continue
++        if pd.api.types.is_datetime64_any_dtype(df[col]) or pd.api.types.is_bool_dtype(df[col]):
++            continue
++        non_null = int(df[col].notna().sum())
++        if non_null == 0:
++            continue
++        parsed_ok = int(parse_numeric_series(df[col]).notna().sum())
++        if parsed_ok > 0 and parsed_ok / non_null >= 0.6:
++            valid.append(col)
++    return valid
++
++
++# --------------------------------------------------------------------------- column guessing
++def find_qty_column(df: pd.DataFrame, exclude=()):
++    for c in valid_numeric_columns(df):
++        if c in exclude:
++            continue
++        if QTY_RE.search(c) and not PRICE_RE.search(c) and not COST_RE.search(c):
++            return c
++    return None
++
++
++def _is_unit_price(col: str) -> bool:
++    return bool(PRICE_RE.search(col)) and not TOTALISH_RE.search(col)
++
++
++def _is_unit_cost(col: str) -> bool:
++    return bool(COST_RE.search(col)) and bool(UNIT_COST_RE.search(col)) and not re.search(r"total", col, re.I)
++
++
++def _pick_revenue(nums: list):
++    tier1 = [c for c in nums if REV_INCLUDE.search(c) and not REV_EXCLUDE.search(c)]
++    for pattern in (r"total", r"revenue|sales|turnover|takings|proceeds", r"amount|income|gross|paid"):
++        for c in tier1:
++            if re.search(pattern, c, re.I):
++                return c
++    if tier1:
++        return tier1[0]
++    for c in nums:  # price column: analyze_dataset multiplies by quantity
++        if PRICE_RE.search(c) and not COST_RE.search(c):
++            return c
++    for c in nums:
++        if not QTY_RE.search(c) and not COST_RE.search(c):
++            return c
++    return nums[0] if nums else None
++
++
++def _pick_cost(nums: list, revenue_col):
++    cands = [c for c in nums if c != revenue_col and COST_RE.search(c)]
++    if not cands:
++        return "None"
++    for c in cands:
++        if re.search(r"total", c, re.I):
++            return c
++    for c in cands:
++        if not UNIT_COST_RE.search(c):
++            return c
++    return cands[0]
++
++
++def suggest_columns(df: pd.DataFrame) -> dict:
++    nums = valid_numeric_columns(df)
++    rev = _pick_revenue(nums)
++    cost = _pick_cost(nums, rev)
++
++    date_col = "None"
++    for c in df.columns:
++        if c in nums and not DATE_NAME_RE.search(c):
++            continue
++        if _is_date_like(df[c], c):
++            date_col = c
++            break
++
++    text_cols = [c for c in df.columns
++                 if c not in nums and c != date_col
++                 and not pd.api.types.is_numeric_dtype(df[c])
++                 and not _is_date_like(df[c], c)
++                 and not FORBIDDEN_COL_PATTERNS.search(c)]
++    cat = "None"
++    for c in text_cols:
++        if CAT_NAME_RE.search(c):
++            cat = c
++            break
++    if cat == "None":
++        for c in text_cols:
++            n = df[c].nunique(dropna=True)
++            if 1 < n <= max(30, int(0.5 * len(df))):
++                cat = c
++                break
++
++    return {"revenue": rev if rev else "None", "cost": cost, "category": cat, "date": date_col,
++            "qty": find_qty_column(df, exclude=(rev, cost)) or "None"}
++
++
++# --------------------------------------------------------------------------- analysis
++def _labelled_concentration(rbc: dict, total_revenue: float) -> dict:
++    if not rbc:
++        return {"top_category": "N/A", "share_pct": 0.0, "share": "No category column selected"}
++    top_name, top_val = next(iter(rbc.items()))
++    share = (top_val / total_revenue * 100) if total_revenue > 0 else 0.0
++    if len(rbc) == 1:
++        label = f"Only one category ({top_name})"
++    elif share > 50:
++        label = f"High ({share:.1f}% from {top_name})"
++    elif share > 30:
++        label = f"Moderate ({share:.1f}% from {top_name})"
++    else:
++        label = f"Low ({share:.1f}% from {top_name})"
++    return {"top_category": top_name, "share_pct": float(share), "share": label}
++
++
++def analyze_dataset(df: pd.DataFrame, revenue_col: str, cost_col: str = "None",
++                    category_col: str = "None", date_col: str = "None", prep_notes: list = None) -> dict:
++    if revenue_col not in df.columns:
++        raise ValueError(f"Revenue column '{revenue_col}' not found.")
++    notes = list(prep_notes or [])
++    warnings = []
++    n = len(df)
++
++    raw_rev = parse_numeric_series(df[revenue_col])
++    unreadable = int((raw_rev.isna() & df[revenue_col].notna()).sum())
++    rev = raw_rev.fillna(0.0).to_numpy(dtype=float)
++
++    qty_col = find_qty_column(df, exclude=(revenue_col, cost_col))
++    if _is_unit_price(revenue_col) and qty_col:
++        qty = parse_numeric_series(df[qty_col]).fillna(0.0).to_numpy(dtype=float)
++        rev = rev * qty
++        notes.append(f"Revenue was calculated as {qty_col} x {revenue_col} for each row.")
++
++    total_revenue = float(rev.sum())
++
++    cost_known, total_costs, net_profit, profit_margin = False, None, None, None
++    if cost_col not in (None, "None") and cost_col in df.columns:
++        raw_cost = parse_numeric_series(df[cost_col])
++        unreadable += int((raw_cost.isna() & df[cost_col].notna()).sum())
++        cost = raw_cost.fillna(0.0).to_numpy(dtype=float)
++        if _is_unit_cost(cost_col) and qty_col:
++            cost = cost * parse_numeric_series(df[qty_col]).fillna(0.0).to_numpy(dtype=float)
++            notes.append(f"Costs were calculated as {qty_col} x {cost_col} for each row.")
++        total_costs = float(cost.sum())
++        net_profit = total_revenue - total_costs
++        profit_margin = (net_profit / total_revenue * 100) if total_revenue > 0 else None
++        cost_known = True
++
++    missing_cells = int(df.isna().sum().sum())
++    duplicate_rows = int(df.duplicated().sum())
++    cells = max(1, n * max(1, len(df.columns)))
++    health = max(0, 100 - int(missing_cells / cells * 50) - int(duplicate_rows / max(1, n) * 50))
++
++    # Categories: group ignoring case and stray spaces, show the most common spelling.
++    revenue_by_category = {}
++    if category_col not in (None, "None") and category_col in df.columns:
++        label = df[category_col].astype("string").str.strip().fillna("(blank)").to_numpy(dtype=object)
++        key = np.array([str(x).casefold() for x in label], dtype=object)
++        frame = pd.DataFrame({"key": key, "label": label, "rev": rev})
++        names = frame.groupby("key")["label"].agg(lambda s: s.value_counts().index[0])
++        sums = frame.groupby("key")["rev"].sum().sort_values(ascending=False)
++        revenue_by_category = {str(names[k]): float(v) for k, v in sums.items()}
++
++    concentration = _labelled_concentration(revenue_by_category, total_revenue)
++    items = list(revenue_by_category.items())
++    leaderboards = {
++        "top": [[k, v] for k, v in items[:5]],
++        "bottom": [[k, v] for k, v in items[-3:]] if len(items) > 5 else [],
++    }
++
++    # Trend
++    trend = {"granularity": "none", "points": [], "change_pct": None}
++    if date_col not in (None, "None") and date_col in df.columns:
++        dates = df[date_col] if pd.api.types.is_datetime64_any_dtype(df[date_col]) else \
++            pd.to_datetime(df[date_col], errors="coerce", dayfirst=True, format="mixed")
++        ok = dates.notna().to_numpy()
++        if ok.mean() < 0.8 and n:
++            warnings.append(f"Only {ok.mean()*100:.0f}% of the dates in '{date_col}' could be read, so the trend may be incomplete.")
++        if ok.any():
++            tdf = pd.DataFrame({"date": dates.to_numpy()[ok], "rev": rev[ok]})
++            months = tdf.groupby(pd.to_datetime(tdf["date"]).dt.to_period("M"))["rev"].sum()
++            if len(months) == 1 and pd.to_datetime(tdf["date"]).dt.normalize().nunique() >= 7:
++                days = tdf.groupby(pd.to_datetime(tdf["date"]).dt.normalize())["rev"].sum()
++                trend = {"granularity": "Day",
++                         "points": [{"period": d.strftime("%Y-%m-%d"), "revenue": float(v)} for d, v in days.items()],
++                         "change_pct": None}
++            else:
++                vals = [float(v) for v in months.values]
++                change = None
++                if len(vals) >= 2 and vals[-2] > 0:
++                    change = float((vals[-1] - vals[-2]) / vals[-2] * 100)
++                trend = {"granularity": "Month",
++                         "points": [{"period": str(p), "revenue": float(v)} for p, v in months.items()],
++                         "change_pct": change}
++
++    # Outliers (IQR rule on the revenue per row)
++    anomalies, anomaly_count = [], 0
++    if n > 5:
++        q1, q3 = np.percentile(rev, [25, 75])
++        iqr = q3 - q1
++        if iqr > 0:
++            idx = np.where(rev > q3 + 1.5 * iqr)[0]
++            anomaly_count = int(len(idx))
++            cat_vals = df[category_col].astype(str).to_numpy() if category_col in df.columns else None
++            for i in idx[np.argsort(-rev[idx])][:10]:
++                anomalies.append({"row_index": int(i), "revenue": float(rev[i]),
++                                  "category": str(cat_vals[i]) if cat_vals is not None else "N/A"})
++
++    # Honest warnings
++    if unreadable:
++        warnings.append(f"{unreadable:,} cell(s) in your revenue/cost columns could not be read as numbers and were counted as 0.")
++    neg = int((rev < 0).sum())
++    if neg:
++        warnings.append(f"{neg:,} row(s) have negative revenue (refunds or returns?). They reduce your total.")
++    if missing_cells:
++        warnings.append(f"Your file has {missing_cells:,} empty cell(s).")
++    if duplicate_rows:
++        warnings.append(f"{duplicate_rows:,} row(s) are exact duplicates. Check they are not double entries.")
++    if not cost_known:
++        warnings.append("No cost column selected. Profit and margin are shown as n/a.")
++
++    return {
++        "totals": {"total_revenue": total_revenue, "total_costs": total_costs, "net_profit": net_profit,
++                   "profit_margin": profit_margin, "cost_known": cost_known},
++        "metadata": {"total_records": n, "total_rows": n, "data_health_index": health,
++                     "missing_cells": missing_cells, "duplicate_rows": duplicate_rows,
++                     "anomaly_count": anomaly_count, "revenue_column": revenue_col, "cost_column": cost_col,
++                     "category_column": category_col, "date_column": date_col},
++        "trend": trend,
++        "revenue_by_category": revenue_by_category,
++        "leaderboards": leaderboards,
++        "concentration": concentration,
++        "anomalies": anomalies,
++        "anomaly_summary": f"{anomaly_count} unusually large row(s) found (above the normal range for your data).",
++        "warnings": warnings,
++        "preparation_notes": notes,
++    }
++
++
++# --------------------------------------------------------------------------- AI payload
++def mask_ai_payload(payload: dict) -> dict:
++    """Return a copy where every category name is replaced by 'Category N'."""
++    out = copy.deepcopy(payload)
++    names = list((out.get("revenue_by_category") or {}).keys())
++    for group in (out.get("leaderboards") or {}).values():
++        for name, _ in group:
++            if name not in names:
++                names.append(name)
++    mapping = {nm: f"Category {i + 1}" for i, nm in enumerate(names)}
++    ordered = sorted(mapping, key=len, reverse=True)
++
++    def scrub(text):
++        if not isinstance(text, str):
++            return text
++        for nm in ordered:
++            text = text.replace(nm, mapping[nm])
++        return text
++
++    if out.get("revenue_by_category"):
++        out["revenue_by_category"] = {mapping[k]: v for k, v in out["revenue_by_category"].items()}
++    if out.get("leaderboards"):
++        out["leaderboards"] = {g: [[mapping.get(n, n), v] for n, v in rows] for g, rows in out["leaderboards"].items()}
++    if out.get("concentration"):
++        c = out["concentration"]
++        c["top_category"] = mapping.get(c.get("top_category"), c.get("top_category"))
++        c["share"] = scrub(c.get("share"))
++    out["warnings"] = [scrub(w) for w in out.get("warnings", [])]
++    return out
++
++
++def build_ai_payload(facts: dict, mask: bool = False) -> dict:
++    """Aggregates only. No raw rows, no row numbers, no per-row categories."""
++    payload = {
++        "metadata": facts.get("metadata"),
++        "totals": facts.get("totals"),
++        "revenue_by_category": dict(list((facts.get("revenue_by_category") or {}).items())[:15]),
++        "leaderboards": facts.get("leaderboards"),
++        "concentration": facts.get("concentration"),
++        "trend": facts.get("trend"),
++        "anomaly_summary": facts.get("anomaly_summary"),
++        "anomalies": [{"revenue": a["revenue"]} for a in facts.get("anomalies", [])[:5]],
++        "warnings": facts.get("warnings", []),
++    }
++    return mask_ai_payload(payload) if mask else payload
+diff -urN a/database.py b/database.py
+--- a/database.py	2026-10-15 00:21:54.719324532 +0100
++++ b/database.py	2026-10-15 00:21:54.722936999 +0100
+@@ -1,177 +1,382 @@
+-"""
+-database.py - FINCH Database & Security Persistence Layer
+-"""
+-import os
+-import hashlib
+-import secrets
+-from contextlib import contextmanager
+-import duckdb
+-
+-DB_PATH = "finch_v3.duckdb"
+-
+-@contextmanager
+-def get_connection():
+-    conn = duckdb.connect(DB_PATH)
+-    try:
+-        yield conn
+-    finally:
+-        conn.close()
+-
+-def init_db():
+-    with get_connection() as conn:
+-        conn.execute("""
+-            CREATE TABLE IF NOT EXISTS tenants (
+-                username VARCHAR PRIMARY KEY,
+-                email VARCHAR UNIQUE,
+-                password_hash VARCHAR,
+-                salt VARCHAR,
+-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+-                last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+-                total_uploads INTEGER DEFAULT 0
+-            )
+-        """)
+-        conn.execute("""
+-            CREATE TABLE IF NOT EXISTS scenarios (
+-                id INTEGER PRIMARY KEY,
+-                username VARCHAR,
+-                scenario_name VARCHAR,
+-                data_key VARCHAR,
+-                payload VARCHAR
+-            )
+-        """)
+-        conn.execute("""
+-            CREATE TABLE IF NOT EXISTS audit_history (
+-                id INTEGER PRIMARY KEY,
+-                email VARCHAR,
+-                company VARCHAR,
+-                file_name VARCHAR,
+-                total_revenue DOUBLE,
+-                net_profit DOUBLE,
+-                profit_margin DOUBLE,
+-                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+-                summary TEXT
+-            )
+-        """)
+-        conn.execute("""
+-            CREATE TABLE IF NOT EXISTS feedback (
+-                id INTEGER PRIMARY KEY,
+-                username VARCHAR,
+-                feedback_text TEXT,
+-                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+-            )
+-        """)
+-
+-def hash_password(password: str, salt: str = None) -> tuple:
+-    if not salt:
+-        salt = secrets.token_hex(16)
+-    pwd_hash = hashlib.pbkdf2_hmac(
+-        'sha256',
+-        password.encode('utf-8'),
+-        bytes.fromhex(salt),
+-        100000
+-    ).hex()
+-    return pwd_hash, salt
+-
+-def create_user(username: str, email: str, password: str) -> bool:
+-    init_db()
+-    uname = username.strip().lower()
+-    uemail = email.strip().lower()
+-    pwd_hash, salt = hash_password(password)
+-    try:
+-        with get_connection() as conn:
+-            conn.execute(
+-                "INSERT INTO tenants (username, email, password_hash, salt) VALUES (?, ?, ?, ?)",
+-                (uname, uemail, pwd_hash, salt)
+-            )
+-        return True
+-    except Exception:
+-        return False
+-
+-def verify_user(username_or_email: str, password: str) -> str:
+-    init_db()
+-    key = username_or_email.strip().lower()
+-    try:
+-        with get_connection() as conn:
+-            row = conn.execute(
+-                "SELECT username, password_hash, salt FROM tenants WHERE username = ? OR email = ?",
+-                (key, key)
+-            ).fetchone()
+-            if not row:
+-                return None
+-            uname, stored_hash, salt = row
+-            test_hash, _ = hash_password(password, salt)
+-            if secrets.compare_digest(test_hash, stored_hash):
+-                conn.execute("UPDATE tenants SET last_active = CURRENT_TIMESTAMP WHERE username = ?", (uname,))
+-                return uname
+-    except Exception:
+-        pass
+-    return None
+-
+-def get_user_email(username: str) -> str:
+-    with get_connection() as conn:
+-        row = conn.execute("SELECT email FROM tenants WHERE username = ?", (username,)).fetchone()
+-        return row[0] if row else ""
+-
+-def save_scenario_db(username: str, name: str, data_key: str, payload: dict):
+-    import json
+-    with get_connection() as conn:
+-        # Get next ID for DuckDB table insertion
+-        max_id = conn.execute("SELECT COALESCE(MAX(id), 0) FROM scenarios").fetchone()[0]
+-        next_id = max_id + 1
+-        conn.execute(
+-            "INSERT INTO scenarios (id, username, scenario_name, data_key, payload) VALUES (?, ?, ?, ?, ?)",
+-            (next_id, username, name, data_key, json.dumps(payload))
+-        )
+-
+-def load_scenarios_db(username: str, data_key: str) -> list:
+-    import json
+-    with get_connection() as conn:
+-        rows = conn.execute(
+-            "SELECT scenario_name, payload FROM scenarios WHERE username = ? AND data_key = ?",
+-            [username, data_key]
+-        ).fetchall()
+-        res = []
+-        for r in rows:
+-            p = json.loads(r[1])
+-            p["scenario_name"] = r[0]
+-            res.append(p)
+-        return res
+-
+-def delete_scenarios_db(username: str, data_key: str):
+-    with get_connection() as conn:
+-        conn.execute("DELETE FROM scenarios WHERE username = ? AND data_key = ?", (username, data_key))
+-
+-def save_feedback_db(username: str, feedback_text: str):
+-    with get_connection() as conn:
+-        max_id = conn.execute("SELECT COALESCE(MAX(id), 0) FROM feedback").fetchone()[0]
+-        conn.execute(
+-            "INSERT INTO feedback (id, username, feedback_text) VALUES (?, ?, ?)",
+-            (max_id + 1, username, feedback_text)
+-        )
+-
+-def log_tenant_activity(email: str, activity: str, increment_upload: bool = False):
+-    with get_connection() as conn:
+-        if increment_upload:
+-            conn.execute("UPDATE tenants SET total_uploads = total_uploads + 1, last_active = CURRENT_TIMESTAMP WHERE email = ?", (email,))
+-        else:
+-            conn.execute("UPDATE tenants SET last_active = CURRENT_TIMESTAMP WHERE email = ?", (email,))
+-
+-def save_audit_history_db(email: str, company: str, file_name: str, totals: dict, summary: str):
+-    with get_connection() as conn:
+-        max_id = conn.execute("SELECT COALESCE(MAX(id), 0) FROM audit_history").fetchone()[0]
+-        conn.execute(
+-            """INSERT INTO audit_history (id, email, company, file_name, total_revenue, net_profit, profit_margin, summary)
+-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+-            (max_id + 1, email, company, file_name, totals.get("total_revenue", 0), totals.get("net_profit", 0), totals.get("profit_margin", 0), summary)
+-        )
+-
+-def load_user_history_db(email: str) -> list:
+-    with get_connection() as conn:
+-        rows = conn.execute(
+-            "SELECT file_name, total_revenue, net_profit, profit_margin, timestamp FROM audit_history WHERE email = ? ORDER BY timestamp DESC",
+-            (email,)
+-        ).fetchall()
+-        return [
+-            {"file_name": r[0], "total_revenue": r[1], "net_profit": r[2], "profit_margin": r[3], "timestamp": r[4]}
+-            for r in rows
+-        ]
+\ No newline at end of file
++"""
++database.py - FINCH Database & Security Persistence Layer (v2.12)
++
++What changed vs v2.11
++- Real sessions: random tokens (only a SHA-256 hash is stored) that expire and can be revoked.
++  This replaces the old "?finch_user=<name>" URL login, which let anyone log in as anyone.
++- Login throttling (5 failures / 15 min per identifier, stored in the DB so it survives restarts).
++- No username enumeration by timing; password hashes carry their own round count and are
++  upgraded on login (old 100k hashes keep working).
++- Password reset with one-time codes (30 min) the founder can hand out until email sending exists.
++- Privacy: export_user_data() and delete_user_data().
++- Safe ids (retry on conflict) instead of racy MAX+1, database path from FINCH_DB_PATH,
++  backups, and an admin overview helper (no raw connections in the UI).
++"""
++import datetime
++import hashlib
++import hmac
++import json
++import os
++import secrets
++from contextlib import contextmanager
++
++import duckdb
++
++DB_PATH = os.getenv("FINCH_DB_PATH", "finch_v3.duckdb")
++PBKDF2_ROUNDS = 200_000
++LEGACY_ROUNDS = 100_000
++MAX_FAILS = 5
++LOCK_MINUTES = 15
++SESSION_HOURS = int(os.getenv("FINCH_SESSION_HOURS", "72"))
++RESET_MINUTES = 30
++_COMMON_PASSWORDS = {"password", "password1", "12345678", "123456789", "qwertyui", "qwerty123", "11111111",
++                     "iloveyou", "admin123", "abc12345", "00000000", "welcome1"}
++_initialised = set()
++
++
++def _now() -> datetime.datetime:
++    return datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
++
++
++@contextmanager
++def get_connection():
++    conn = duckdb.connect(DB_PATH)
++    try:
++        yield conn
++    finally:
++        conn.close()
++
++
++def init_db():
++    if DB_PATH in _initialised:
++        return
++    with get_connection() as conn:
++        conn.execute("""CREATE TABLE IF NOT EXISTS tenants (
++            username VARCHAR PRIMARY KEY, email VARCHAR UNIQUE, password_hash VARCHAR, salt VARCHAR,
++            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
++            total_uploads INTEGER DEFAULT 0)""")
++        conn.execute("""CREATE TABLE IF NOT EXISTS scenarios (
++            id INTEGER PRIMARY KEY, username VARCHAR, scenario_name VARCHAR, data_key VARCHAR, payload VARCHAR)""")
++        conn.execute("""CREATE TABLE IF NOT EXISTS audit_history (
++            id INTEGER PRIMARY KEY, email VARCHAR, company VARCHAR, file_name VARCHAR, total_revenue DOUBLE,
++            net_profit DOUBLE, profit_margin DOUBLE, timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP, summary TEXT)""")
++        conn.execute("""CREATE TABLE IF NOT EXISTS feedback (
++            id INTEGER PRIMARY KEY, username VARCHAR, feedback_text TEXT,
++            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP)""")
++        conn.execute("CREATE TABLE IF NOT EXISTS login_attempts (identifier VARCHAR, ts TIMESTAMP)")
++        conn.execute("CREATE TABLE IF NOT EXISTS sessions (token_hash VARCHAR PRIMARY KEY, username VARCHAR, expires_at TIMESTAMP)")
++        conn.execute("CREATE TABLE IF NOT EXISTS reset_codes (username VARCHAR PRIMARY KEY, code_hash VARCHAR, expires_at TIMESTAMP)")
++    _initialised.add(DB_PATH)
++
++
++def _insert_with_id(conn, table: str, columns: list, values: list, tries: int = 5):
++    """Insert a row with the next integer id; retry if a concurrent writer took the same id."""
++    marks = ", ".join(["?"] * (len(columns) + 1))
++    sql = f"INSERT INTO {table} (id, {', '.join(columns)}) VALUES ({marks})"
++    last = None
++    for _ in range(tries):
++        next_id = conn.execute(f"SELECT COALESCE(MAX(id), 0) + 1 FROM {table}").fetchone()[0]
++        try:
++            conn.execute(sql, [next_id] + list(values))
++            return
++        except Exception as e:  # primary-key conflict from a concurrent writer
++            last = e
++    raise last
++
++
++# --------------------------------------------------------------------------- passwords
++def password_problem(password: str, username: str = ""):
++    """Return a human message if the password is not acceptable, else None."""
++    if len(password) < 8:
++        return "Password must be at least 8 characters."
++    if len(password) > 128:
++        return "Password is too long (max 128 characters)."
++    if password.lower() in _COMMON_PASSWORDS or (username and password.lower() == username.strip().lower()):
++        return "That password is too easy to guess. Choose another."
++    if password.isdigit():
++        return "Use letters as well as numbers in your password."
++    return None
++
++
++def hash_password(password: str, salt: str = None, rounds: int = PBKDF2_ROUNDS) -> tuple:
++    """Returns (stored_hash, salt). stored_hash looks like 'pbkdf2$200000$<hex>'."""
++    salt = salt or secrets.token_hex(16)
++    digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), bytes.fromhex(salt), rounds).hex()
++    return f"pbkdf2${rounds}${digest}", salt
++
++
++def _check_password(password: str, salt: str, stored: str) -> tuple:
++    """(matches, rounds_used). Old hashes are plain hex at 100k rounds."""
++    if stored.startswith("pbkdf2$"):
++        _, r, digest = stored.split("$", 2)
++        rounds = int(r)
++    else:
++        digest, rounds = stored, LEGACY_ROUNDS
++    test = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), bytes.fromhex(salt), rounds).hex()
++    return hmac.compare_digest(test, digest), rounds
++
++
++_DUMMY_SALT = "00" * 16
++_DUMMY_HASH = hash_password("dummy-password", _DUMMY_SALT)[0]
++
++
++def create_user(username: str, email: str, password: str) -> bool:
++    init_db()
++    uname, uemail = username.strip().lower(), email.strip().lower()
++    if password_problem(password, uname):
++        return False
++    pwd_hash, salt = hash_password(password)
++    try:
++        with get_connection() as conn:
++            if conn.execute("SELECT 1 FROM tenants WHERE username = ? OR email = ?", [uname, uemail]).fetchone():
++                return False
++            conn.execute("INSERT INTO tenants (username, email, password_hash, salt) VALUES (?, ?, ?, ?)",
++                         [uname, uemail, pwd_hash, salt])
++        return True
++    except Exception:
++        return False
++
++
++# --------------------------------------------------------------------------- throttling
++def _record_failure(conn, key: str):
++    now = _now()
++    conn.execute("DELETE FROM login_attempts WHERE ts < ?", [now - datetime.timedelta(days=1)])
++    conn.execute("INSERT INTO login_attempts (identifier, ts) VALUES (?, ?)", [key, now])
++
++
++def _is_locked(conn, key: str) -> bool:
++    since = _now() - datetime.timedelta(minutes=LOCK_MINUTES)
++    n = conn.execute("SELECT COUNT(*) FROM login_attempts WHERE identifier = ? AND ts > ?", [key, since]).fetchone()[0]
++    return n >= MAX_FAILS
++
++
++def login_locked(identifier: str) -> bool:
++    init_db()
++    with get_connection() as conn:
++        return _is_locked(conn, identifier.strip().lower())
++
++
++def verify_user(username_or_email: str, password: str):
++    """Return the username on success, else None. Locked identifiers always fail."""
++    init_db()
++    key = username_or_email.strip().lower()
++    if not key or len(password) > 128:
++        return None
++    with get_connection() as conn:
++        if _is_locked(conn, key):
++            return None
++        row = conn.execute("SELECT username, password_hash, salt FROM tenants WHERE username = ? OR email = ?",
++                           [key, key]).fetchone()
++        if not row:
++            _check_password(password, _DUMMY_SALT, _DUMMY_HASH)  # same cost as a real check
++            _record_failure(conn, key)
++            return None
++        uname, stored, salt = row
++        ok, rounds = _check_password(password, salt, stored)
++        if not ok:
++            _record_failure(conn, key)
++            return None
++        conn.execute("DELETE FROM login_attempts WHERE identifier = ?", [key])
++        if rounds < PBKDF2_ROUNDS:
++            new_hash, _ = hash_password(password, salt)
++            conn.execute("UPDATE tenants SET password_hash = ? WHERE username = ?", [new_hash, uname])
++        conn.execute("UPDATE tenants SET last_active = ? WHERE username = ?", [_now(), uname])
++        return uname
++
++
++# --------------------------------------------------------------------------- sessions
++def _sha(token: str) -> str:
++    return hashlib.sha256(token.encode("utf-8")).hexdigest()
++
++
++def create_session(username: str, hours: int = None) -> str:
++    init_db()
++    token = secrets.token_urlsafe(32)
++    with get_connection() as conn:
++        conn.execute("DELETE FROM sessions WHERE expires_at < ?", [_now()])
++        conn.execute("INSERT INTO sessions (token_hash, username, expires_at) VALUES (?, ?, ?)",
++                     [_sha(token), username, _now() + datetime.timedelta(hours=hours or SESSION_HOURS)])
++    return token
++
++
++def get_session_user(token: str):
++    if not token or len(token) > 200:
++        return None
++    init_db()
++    with get_connection() as conn:
++        row = conn.execute("SELECT username FROM sessions WHERE token_hash = ? AND expires_at > ?",
++                           [_sha(token), _now()]).fetchone()
++    return row[0] if row else None
++
++
++def delete_session(token: str):
++    if token:
++        init_db()
++        with get_connection() as conn:
++            conn.execute("DELETE FROM sessions WHERE token_hash = ?", [_sha(token)])
++
++
++# --------------------------------------------------------------------------- password reset
++def create_reset_code(identifier: str):
++    """Founder-side: returns (username, one-time code) or None if the account does not exist."""
++    init_db()
++    key = identifier.strip().lower()
++    with get_connection() as conn:
++        row = conn.execute("SELECT username FROM tenants WHERE username = ? OR email = ?", [key, key]).fetchone()
++        if not row:
++            return None
++        code = secrets.token_hex(4).upper()
++        conn.execute("DELETE FROM reset_codes WHERE username = ?", [row[0]])
++        conn.execute("INSERT INTO reset_codes (username, code_hash, expires_at) VALUES (?, ?, ?)",
++                     [row[0], _sha(code), _now() + datetime.timedelta(minutes=RESET_MINUTES)])
++    return row[0], code
++
++
++def redeem_reset_code(identifier: str, code: str, new_password: str) -> bool:
++    init_db()
++    key = identifier.strip().lower()
++    guard = "reset:" + key
++    with get_connection() as conn:
++        if _is_locked(conn, guard):
++            return False
++        row = conn.execute("SELECT username FROM tenants WHERE username = ? OR email = ?", [key, key]).fetchone()
++        rc = conn.execute("SELECT code_hash FROM reset_codes WHERE username = ? AND expires_at > ?",
++                          [row[0], _now()]).fetchone() if row else None
++        good = bool(rc) and hmac.compare_digest(rc[0], _sha(code.strip().upper()))
++        if not good or password_problem(new_password, row[0] if row else ""):
++            _record_failure(conn, guard)
++            return False
++        new_hash, salt = hash_password(new_password)
++        conn.execute("UPDATE tenants SET password_hash = ?, salt = ? WHERE username = ?", [new_hash, salt, row[0]])
++        conn.execute("DELETE FROM reset_codes WHERE username = ?", [row[0]])
++        conn.execute("DELETE FROM sessions WHERE username = ?", [row[0]])
++        conn.execute("DELETE FROM login_attempts WHERE identifier IN (?, ?, ?)", [key, row[0], guard])
++    return True
++
++
++# --------------------------------------------------------------------------- accounts & data
++def get_user_email(username: str) -> str:
++    init_db()
++    with get_connection() as conn:
++        row = conn.execute("SELECT email FROM tenants WHERE username = ?", [username]).fetchone()
++    return row[0] if row else ""
++
++
++def save_scenario_db(username: str, name: str, data_key: str, payload: dict):
++    init_db()
++    with get_connection() as conn:
++        _insert_with_id(conn, "scenarios", ["username", "scenario_name", "data_key", "payload"],
++                        [username, (name or "Scenario")[:80], data_key, json.dumps(payload, default=str)])
++
++
++def load_scenarios_db(username: str, data_key: str) -> list:
++    init_db()
++    with get_connection() as conn:
++        rows = conn.execute("SELECT scenario_name, payload FROM scenarios WHERE username = ? AND data_key = ? ORDER BY id",
++                            [username, data_key]).fetchall()
++    out = []
++    for name, raw in rows:
++        try:
++            p = json.loads(raw)
++        except Exception:
++            continue
++        p["scenario_name"] = name
++        p.setdefault("margin", p.get("profit_margin"))
++        out.append(p)
++    return out
++
++
++def delete_scenarios_db(username: str, data_key: str):
++    init_db()
++    with get_connection() as conn:
++        conn.execute("DELETE FROM scenarios WHERE username = ? AND data_key = ?", [username, data_key])
++
++
++def save_feedback_db(username: str, feedback_text: str):
++    init_db()
++    with get_connection() as conn:
++        _insert_with_id(conn, "feedback", ["username", "feedback_text", "timestamp"],
++                        [username, (feedback_text or "")[:2000], _now()])
++
++
++def log_tenant_activity(email: str, activity: str, increment_upload: bool = False):
++    init_db()
++    with get_connection() as conn:
++        if increment_upload:
++            conn.execute("UPDATE tenants SET total_uploads = total_uploads + 1, last_active = ? WHERE email = ?", [_now(), email])
++        else:
++            conn.execute("UPDATE tenants SET last_active = ? WHERE email = ?", [_now(), email])
++
++
++def save_audit_history_db(email: str, company: str, file_name: str, totals: dict, summary: str):
++    init_db()
++    with get_connection() as conn:
++        _insert_with_id(conn, "audit_history",
++                        ["email", "company", "file_name", "total_revenue", "net_profit", "profit_margin", "timestamp", "summary"],
++                        [email, company, file_name, totals.get("total_revenue"), totals.get("net_profit"),
++                         totals.get("profit_margin"), _now(), summary])
++
++
++def load_user_history_db(email: str) -> list:
++    init_db()
++    try:
++        with get_connection() as conn:
++            rows = conn.execute("SELECT file_name, total_revenue, net_profit, profit_margin, timestamp "
++                                "FROM audit_history WHERE email = ? ORDER BY timestamp DESC, id DESC", [email]).fetchall()
++    except Exception:
++        return []
++    return [{"file_name": r[0], "total_revenue": r[1], "net_profit": r[2], "profit_margin": r[3], "timestamp": r[4]}
++            for r in rows]
++
++
++def export_user_data(username: str) -> dict:
++    """Everything stored about a user, as plain data (for the 'download my data' button)."""
++    init_db()
++    email = get_user_email(username)
++    with get_connection() as conn:
++        acct = conn.execute("SELECT username, email, created_at, last_active, total_uploads FROM tenants WHERE username = ?",
++                            [username]).fetchone()
++        scen = conn.execute("SELECT scenario_name, payload FROM scenarios WHERE username = ? ORDER BY id", [username]).fetchall()
++        hist = conn.execute("SELECT file_name, total_revenue, net_profit, profit_margin, timestamp, summary "
++                            "FROM audit_history WHERE email = ? ORDER BY id", [email]).fetchall()
++        fb = conn.execute("SELECT feedback_text, timestamp FROM feedback WHERE username = ? ORDER BY id", [username]).fetchall()
++    return json.loads(json.dumps({
++        "account": dict(zip(["username", "email", "created_at", "last_active", "total_uploads"], acct)) if acct else {},
++        "scenarios": [{"name": n, **json.loads(p)} for n, p in scen],
++        "reports": [dict(zip(["file_name", "total_revenue", "net_profit", "profit_margin", "timestamp", "summary"], h)) for h in hist],
++        "feedback": [{"text": t, "timestamp": ts} for t, ts in fb],
++    }, default=str))
++
++
++def delete_user_data(username: str):
++    """Permanently delete the account and everything stored for it."""
++    init_db()
++    email = get_user_email(username)
++    with get_connection() as conn:
++        conn.execute("DELETE FROM scenarios WHERE username = ?", [username])
++        conn.execute("DELETE FROM feedback WHERE username = ?", [username])
++        conn.execute("DELETE FROM sessions WHERE username = ?", [username])
++        conn.execute("DELETE FROM reset_codes WHERE username = ?", [username])
++        if email:
++            conn.execute("DELETE FROM audit_history WHERE email = ?", [email])
++        conn.execute("DELETE FROM login_attempts WHERE identifier IN (?, ?)", [username, email or username])
++        conn.execute("DELETE FROM tenants WHERE username = ?", [username])
++
++
++# --------------------------------------------------------------------------- admin
++def get_tenants_overview() -> list:
++    init_db()
++    with get_connection() as conn:
++        rows = conn.execute("SELECT email, created_at, last_active, total_uploads FROM tenants ORDER BY last_active DESC").fetchall()
++    return [dict(zip(["email", "created_at", "last_active", "total_uploads"], r)) for r in rows]
++
++
++def backup_database(dest_dir: str = "backups") -> str:
++    """Export the whole database (Parquet) to a timestamped folder and return its path."""
++    init_db()
++    path = os.path.join(dest_dir, "finch_backup_" + _now().strftime("%Y%m%d_%H%M%S"))
++    os.makedirs(path, exist_ok=True)
++    safe = path.replace("'", "''")
++    with get_connection() as conn:
++        conn.execute(f"EXPORT DATABASE '{safe}' (FORMAT PARQUET)")
++    return path
+diff -urN a/deck_builder.py b/deck_builder.py
+--- a/deck_builder.py	2026-10-15 00:21:54.719404527 +0100
++++ b/deck_builder.py	2026-10-15 00:21:54.722369007 +0100
+@@ -1,245 +1,279 @@
+-"""
+-deck_builder.py - FINCH Presentation Generator with Native Charts
+-"""
+-import io
+-from pptx import Presentation
+-from pptx.util import Inches, Pt
+-from pptx.dml.color import RGBColor
+-from pptx.enum.text import PP_ALIGN
+-from pptx.enum.shapes import MSO_SHAPE
+-from pptx.chart.data import CategoryChartData
+-from pptx.enum.chart import XL_CHART_TYPE, XL_LEGEND_POSITION
+-
+-def create_executive_deck(facts, currency="₦", filename="Dataset", scenarios=None):
+-    prs = Presentation()
+-    prs.slide_width = Inches(13.333)
+-    prs.slide_height = Inches(7.5)
+-    blank_slide_layout = prs.slide_layouts[6]
+-
+-    theme_colors = {
+-        "bg_dark": RGBColor(9, 13, 22),
+-        "bg_light": RGBColor(255, 255, 255),
+-        "card_bg": RGBColor(248, 250, 252),
+-        "primary": RGBColor(15, 23, 42),
+-        "accent": RGBColor(15, 157, 143),
+-        "success": RGBColor(16, 185, 129),
+-        "gold": RGBColor(244, 184, 96),
+-        "text_muted": RGBColor(100, 116, 139),
+-    }
+-
+-    totals = facts.get("totals", {})
+-    meta = facts.get("metadata", {})
+-    rbc = facts.get("revenue_by_category", {})
+-    trend = facts.get("trend", {})
+-
+-    def set_background(slide, color):
+-        background = slide.background
+-        fill = background.fill
+-        fill.solid()
+-        fill.fore_color.rgb = color
+-
+-    def add_header(slide, category: str, title: str, subtitle: str = ""):
+-        txBox = slide.shapes.add_textbox(Inches(0.8), Inches(0.4), Inches(11.5), Inches(0.4))
+-        tf = txBox.text_frame
+-        tf.word_wrap = True
+-        p = tf.paragraphs[0]
+-        p.text = category.upper()
+-        p.font.size = Pt(11)
+-        p.font.bold = True
+-        p.font.color.rgb = theme_colors["accent"]
+-
+-        txBox_title = slide.shapes.add_textbox(Inches(0.8), Inches(0.75), Inches(11.5), Inches(0.8))
+-        tf_title = txBox_title.text_frame
+-        tf_title.word_wrap = True
+-        p_title = tf_title.paragraphs[0]
+-        p_title.text = title
+-        p_title.font.size = Pt(26)
+-        p_title.font.bold = True
+-        p_title.font.color.rgb = theme_colors["primary"]
+-
+-        if subtitle:
+-            txBox_sub = slide.shapes.add_textbox(Inches(0.8), Inches(1.4), Inches(11.5), Inches(0.4))
+-            tf_sub = txBox_sub.text_frame
+-            tf_sub.word_wrap = True
+-            p_sub = tf_sub.paragraphs[0]
+-            p_sub.text = subtitle
+-            p_sub.font.size = Pt(13)
+-            p_sub.font.color.rgb = theme_colors["text_muted"]
+-
+-    # SLIDE 1: Title
+-    slide1 = prs.slides.add_slide(blank_slide_layout)
+-    set_background(slide1, theme_colors["bg_dark"])
+-    txBox = slide1.shapes.add_textbox(Inches(1.0), Inches(2.2), Inches(11.3), Inches(3.5))
+-    tf = txBox.text_frame
+-    tf.word_wrap = True
+-    p0 = tf.paragraphs[0]
+-    p0.text = "FINCH EXECUTIVE REPORT"
+-    p0.font.size = Pt(14)
+-    p0.font.bold = True
+-    p0.font.color.rgb = theme_colors["gold"]
+-    p0.space_after = Pt(14)
+-    p1 = tf.add_paragraph()
+-    p1.text = f"Business Intelligence Audit: {filename}"
+-    p1.font.size = Pt(36)
+-    p1.font.bold = True
+-    p1.font.color.rgb = RGBColor(248, 250, 252)
+-    p1.space_after = Pt(16)
+-    margin_val = totals.get('profit_margin')
+-    margin_str = f"{margin_val:.1f}%" if margin_val is not None else "N/A"
+-    p2 = tf.add_paragraph()
+-    p2.text = f"Automated audit and strategic growth scenarios • Net Margin: {margin_str}"
+-    p2.font.size = Pt(16)
+-    p2.font.color.rgb = theme_colors["text_muted"]
+-
+-    # SLIDE 2: Summary Cards
+-    slide2 = prs.slides.add_slide(blank_slide_layout)
+-    set_background(slide2, theme_colors["bg_light"])
+-    add_header(slide2, "Core Metrics", "Executive Financial Summary", "High-level summary of total top-line revenue, operating costs, and net profit.")
+-    cost_known = totals.get("cost_known", False)
+-    rev_str = f"{currency}{totals.get('total_revenue', 0):,.2f}"
+-    cost_str = f"{currency}{totals.get('total_costs', 0):,.2f}" if cost_known else "N/A"
+-    profit_str = f"{currency}{totals.get('net_profit', 0):,.2f}" if cost_known else "N/A"
+-    metrics = [
+-        {"label": "TOTAL REVENUE", "value": rev_str, "sub": "Gross Inflow", "color": theme_colors["primary"], "bg": theme_colors["card_bg"]},
+-        {"label": "TOTAL COSTS", "value": cost_str, "sub": "Operating Expenses", "color": theme_colors["primary"], "bg": theme_colors["card_bg"]},
+-        {"label": "NET PROFIT", "value": profit_str, "sub": f"{margin_str} Net Margin", "color": theme_colors["success"], "bg": theme_colors["primary"], "dark": True}
+-    ]
+-    for i, m in enumerate(metrics):
+-        x = Inches(0.8) + i * Inches(4.0)
+-        shape = slide2.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, x, Inches(2.2), Inches(3.6), Inches(3.5))
+-        shape.fill.solid()
+-        shape.fill.fore_color.rgb = m["bg"]
+-        tf_card = shape.text_frame
+-        tf_card.word_wrap = True
+-        tf_card.margin_left = Inches(0.3)
+-        tf_card.margin_top = Inches(0.4)
+-        p_lbl = tf_card.paragraphs[0]
+-        p_lbl.text = m["label"]
+-        p_lbl.font.size = Pt(12)
+-        p_lbl.font.bold = True
+-        p_lbl.font.color.rgb = theme_colors["text_muted"] if not m.get("dark") else RGBColor(148, 163, 184)
+-        p_lbl.space_after = Pt(16)
+-        p_val = tf_card.add_paragraph()
+-        p_val.text = m["value"]
+-        p_val.font.size = Pt(28)
+-        p_val.font.bold = True
+-        p_val.font.color.rgb = m["color"]
+-        p_val.space_after = Pt(12)
+-        p_sub = tf_card.add_paragraph()
+-        p_sub.text = m["sub"]
+-        p_sub.font.size = Pt(13)
+-        p_sub.font.bold = True
+-        p_sub.font.color.rgb = theme_colors["accent"] if not m.get("dark") else theme_colors["success"]
+-
+-    # SLIDE 3: Native Category Chart
+-    slide3 = prs.slides.add_slide(blank_slide_layout)
+-    set_background(slide3, theme_colors["bg_light"])
+-    add_header(slide3, "Category Distribution", "Top Revenue Categories", "Native chart breakdown of revenue concentration across categories.")
+-    if rbc:
+-        chart_data = CategoryChartData()
+-        top_cats = list(rbc.items())[:6]
+-        chart_data.categories = [str(k) for k, v in top_cats]
+-        chart_data.add_series("Revenue", tuple(v for k, v in top_cats))
+-        chart_shape = slide3.shapes.add_chart(
+-            XL_CHART_TYPE.COLUMN_CLUSTERED, Inches(0.8), Inches(2.2), Inches(11.7), Inches(4.5), chart_data
+-        )
+-        chart = chart_shape.chart
+-        chart.has_legend = False
+-    else:
+-        txBox = slide3.shapes.add_textbox(Inches(0.8), Inches(2.5), Inches(11.5), Inches(1.0))
+-        txBox.text_frame.paragraphs[0].text = "No category mapping available."
+-
+-    # SLIDE 4: Native Trend Chart
+-    slide4 = prs.slides.add_slide(blank_slide_layout)
+-    set_background(slide4, theme_colors["bg_light"])
+-    add_header(slide4, "Performance Trends", "Chronological Revenue Trend", "Monthly revenue trajectory over active timeline.")
+-    trend_points = trend.get("points", [])
+-    if trend_points:
+-        chart_data = CategoryChartData()
+-        chart_data.categories = [str(p["period"]) for p in trend_points]
+-        chart_data.add_series("Revenue", tuple(p["revenue"] for p in trend_points))
+-        chart_shape = slide4.shapes.add_chart(
+-            XL_CHART_TYPE.LINE, Inches(0.8), Inches(2.2), Inches(11.7), Inches(4.5), chart_data
+-        )
+-        chart_shape.chart.has_legend = False
+-    else:
+-        txBox = slide4.shapes.add_textbox(Inches(0.8), Inches(2.5), Inches(11.5), Inches(1.0))
+-        txBox.text_frame.paragraphs[0].text = "No date column selected for chronological trend."
+-
+-    # SLIDE 5: Data Health
+-    slide5 = prs.slides.add_slide(blank_slide_layout)
+-    set_background(slide5, theme_colors["bg_light"])
+-    add_header(slide5, "Data Governance", "Data Health & Outlier Quality Check", "Automated screening for null cells and duplicate records.")
+-    circle = slide5.shapes.add_shape(MSO_SHAPE.OVAL, Inches(1.2), Inches(2.5), Inches(3.2), Inches(3.2))
+-    circle.fill.solid()
+-    circle.fill.fore_color.rgb = theme_colors["card_bg"]
+-    circle.line.color.rgb = theme_colors["success"]
+-    circle.line.width = Pt(3)
+-    tf_c = circle.text_frame
+-    tf_c.margin_top = Inches(0.9)
+-    p_c1 = tf_c.paragraphs[0]
+-    p_c1.text = f"{meta.get('data_health_index', 100)}%"
+-    p_c1.font.size = Pt(44)
+-    p_c1.font.bold = True
+-    p_c1.font.color.rgb = theme_colors["success"]
+-    p_c1.alignment = PP_ALIGN.CENTER
+-
+-    # SLIDE 6: Strategic Action Plan
+-    slide6 = prs.slides.add_slide(blank_slide_layout)
+-    set_background(slide6, theme_colors["bg_light"])
+-    add_header(slide6, "Execution Roadmap", "FINCH Strategic Action Plan", "Prioritized recommendations to sustain operational efficiency.")
+-    actions = [
+-        {"num": "01", "title": "Margin Optimization", "desc": "Audit high-cost lines and optimize variable per-unit expenses."},
+-        {"num": "02", "title": "Category Scaling", "desc": "Scale channel investment into top-performing regional drivers."},
+-        {"num": "03", "title": "Anomaly Resolution", "desc": "Verify outlier transactions to preserve ledger consistency."},
+-        {"num": "04", "title": "Scenario Targets", "desc": "Deploy sensitivity forecasts to protect bottom-line margins."}
+-    ]
+-    for i, act in enumerate(actions):
+-        x = Inches(0.8) + i * Inches(3.0)
+-        box = slide6.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, x, Inches(2.2), Inches(2.7), Inches(4.2))
+-        box.fill.solid()
+-        box.fill.fore_color.rgb = theme_colors["card_bg"]
+-        tf_a = box.text_frame
+-        tf_a.margin_left = Inches(0.25)
+-        tf_a.margin_top = Inches(0.3)
+-        tf_a.word_wrap = True
+-        p_num = tf_a.paragraphs[0]
+-        p_num.text = act["num"]
+-        p_num.font.size = Pt(20)
+-        p_num.font.bold = True
+-        p_num.font.color.rgb = theme_colors["accent"]
+-        p_num.space_after = Pt(14)
+-        p_at = tf_a.add_paragraph()
+-        p_at.text = act["title"]
+-        p_at.font.size = Pt(15)
+-        p_at.font.bold = True
+-        p_at.font.color.rgb = theme_colors["primary"]
+-        p_at.space_after = Pt(10)
+-        p_ad = tf_a.add_paragraph()
+-        p_ad.text = act["desc"]
+-        p_ad.font.size = Pt(12)
+-        p_ad.font.color.rgb = theme_colors["text_muted"]
+-
+-    # SLIDE 7: Closing
+-    slide7 = prs.slides.add_slide(blank_slide_layout)
+-    set_background(slide7, theme_colors["bg_dark"])
+-    txBox7 = slide7.shapes.add_textbox(Inches(1.5), Inches(2.5), Inches(10.3), Inches(3.0))
+-    tf7 = txBox7.text_frame
+-    tf7.word_wrap = True
+-    p7_1 = tf7.paragraphs[0]
+-    p7_1.text = "Audit Complete & Verified"
+-    p7_1.font.size = Pt(38)
+-    p7_1.font.bold = True
+-    p7_1.font.color.rgb = RGBColor(248, 250, 252)
+-    p7_1.alignment = PP_ALIGN.CENTER
+-    p7_1.space_after = Pt(16)
+-    p7_2 = tf7.add_paragraph()
+-    p7_2.text = "FINCH Business Intelligence Workspace"
+-    p7_2.font.size = Pt(18)
+-    p7_2.font.color.rgb = theme_colors["success"]
+-    p7_2.alignment = PP_ALIGN.CENTER
+-
+-    bio = io.BytesIO()
+-    prs.save(bio)
+-    bio.seek(0)
+-    return bio.getvalue()
+\ No newline at end of file
++"""
++deck_builder.py - FINCH Presentation Generator (v2.12)
++
++Builds a clean PowerPoint from the analysed facts: summary cards, category and trend
++charts, a data-quality slide, saved what-if scenarios (when there are any) and an
++action plan that is generated from YOUR numbers. The deck states plainly that it was
++produced from the uploaded file and has not been audited.
++"""
++import datetime
++import io
++
++from pptx import Presentation
++from pptx.chart.data import CategoryChartData
++from pptx.dml.color import RGBColor
++from pptx.enum.chart import XL_CHART_TYPE, XL_LABEL_POSITION
++from pptx.enum.shapes import MSO_SHAPE
++from pptx.enum.text import PP_ALIGN
++from pptx.util import Inches, Pt
++
++COLORS = {
++    "bg_dark": RGBColor(11, 15, 25),
++    "bg_light": RGBColor(255, 255, 255),
++    "card_bg": RGBColor(244, 247, 250),
++    "primary": RGBColor(15, 23, 42),
++    "accent": RGBColor(15, 157, 143),
++    "success": RGBColor(16, 185, 129),
++    "danger": RGBColor(185, 28, 28),
++    "gold": RGBColor(244, 184, 96),
++    "muted": RGBColor(100, 116, 139),
++    "light_text": RGBColor(248, 250, 252),
++}
++
++
++def _money(v, cur):
++    if v is None:
++        return "n/a"
++    return f"{cur}{v:,.0f}" if abs(v) >= 1000 else f"{cur}{v:,.2f}"
++
++
++def build_actions(facts: dict) -> list:
++    """Return up to 4 {title, desc} actions derived from the numbers."""
++    t, meta = facts.get("totals", {}), facts.get("metadata", {})
++    conc, trend = facts.get("concentration", {}) or {}, facts.get("trend", {}) or {}
++    actions = []
++    if not t.get("cost_known"):
++        actions.append(("Add your costs", "Your file has no cost column, so profit is unknown. Add costs to see what you really keep."))
++    else:
++        m = t.get("profit_margin")
++        if t.get("net_profit") is not None and t["net_profit"] < 0:
++            actions.append(("Stop the loss", "Costs are higher than sales. List your biggest costs and cut or renegotiate the top three."))
++        elif m is not None and m < 10:
++            actions.append(("Protect a thin margin", f"You keep about {m:.1f}% of each sale. A small cost rise could wipe out your profit."))
++    if (conc.get("share_pct") or 0) > 50 and conc.get("top_category") not in (None, "N/A"):
++        actions.append(("Reduce dependence on one line", f"{conc['top_category']} brings in {conc['share_pct']:.0f}% of sales. Grow a second product."))
++    chg = trend.get("change_pct")
++    if chg is not None and chg < -10:
++        actions.append(("Find out why sales dropped", f"Sales fell {abs(chg):.0f}% versus the previous month. Check stock, prices and customers."))
++    elif chg is not None and chg > 10:
++        actions.append(("Keep the momentum", f"Sales grew {chg:.0f}% versus the previous month. Make sure stock and staff can keep up."))
++    if meta.get("anomaly_count"):
++        actions.append(("Check unusually large sales", f"{meta['anomaly_count']} row(s) are far above normal. Confirm they are real and not typing mistakes."))
++    if meta.get("duplicate_rows") or meta.get("missing_cells"):
++        actions.append(("Clean your records", "There are empty cells or duplicate rows. Fix them so future reports are more accurate."))
++    for extra in (("Record every sale", "Daily records make every future report more accurate."),
++                  ("Review monthly", "Upload your file each month and compare against this report.")):
++        if len(actions) < 3:
++            actions.append(extra)
++    return actions[:4]
++
++
++def create_executive_deck(facts, currency="₦", filename="Dataset", scenarios=None):
++    prs = Presentation()
++    prs.slide_width, prs.slide_height = Inches(13.333), Inches(7.5)
++    blank = prs.slide_layouts[6]
++
++    totals, meta = facts.get("totals", {}), facts.get("metadata", {})
++    rbc, trend = facts.get("revenue_by_category", {}) or {}, facts.get("trend", {}) or {}
++    cost_known = bool(totals.get("cost_known"))
++    margin = totals.get("profit_margin")
++    margin_str = f"{margin:.1f}%" if margin is not None else "n/a"
++    today = datetime.date.today().strftime("%d %b %Y")
++    page = {"n": 0}
++
++    def background(slide, color):
++        slide.background.fill.solid()
++        slide.background.fill.fore_color.rgb = color
++
++    def text(slide, x, y, w, h, paragraphs):
++        tb = slide.shapes.add_textbox(Inches(x), Inches(y), Inches(w), Inches(h))
++        tf = tb.text_frame
++        tf.word_wrap = True
++        for i, (txt, size, bold, color) in enumerate(paragraphs):
++            p = tf.paragraphs[0] if i == 0 else tf.add_paragraph()
++            p.text = txt
++            p.font.size, p.font.bold, p.font.color.rgb = Pt(size), bold, color
++            p.space_after = Pt(8)
++        return tb
++
++    def new_slide(kicker, title, subtitle=""):
++        s = prs.slides.add_slide(blank)
++        page["n"] += 1
++        background(s, COLORS["bg_light"])
++        text(s, 0.8, 0.4, 11.5, 0.4, [(kicker.upper(), 11, True, COLORS["accent"])])
++        text(s, 0.8, 0.75, 11.7, 0.8, [(title, 26, True, COLORS["primary"])])
++        if subtitle:
++            text(s, 0.8, 1.4, 11.7, 0.4, [(subtitle, 13, False, COLORS["muted"])])
++        text(s, 0.8, 7.0, 11.7, 0.3, [(f"FINCH  |  {filename}  |  {today}  |  Page {page['n'] + 1}", 9, False, COLORS["muted"])])
++        return s
++
++    def style_chart(chart, as_line=False):
++        chart.has_legend = False
++        chart.has_title = False
++        chart.value_axis.has_major_gridlines = True
++        chart.value_axis.major_gridlines.format.line.color.rgb = RGBColor(226, 232, 240)
++        chart.value_axis.tick_labels.number_format = "#,##0"
++        chart.value_axis.tick_labels.number_format_is_linked = False
++        chart.value_axis.tick_labels.font.size = Pt(11)
++        chart.category_axis.tick_labels.font.size = Pt(11)
++        plot = chart.plots[0]
++        plot.has_data_labels = True
++        dl = plot.data_labels
++        dl.number_format = "#,##0"
++        dl.number_format_is_linked = False
++        dl.font.size = Pt(11)
++        dl.position = XL_LABEL_POSITION.ABOVE if as_line else XL_LABEL_POSITION.OUTSIDE_END
++        ser = plot.series[0]
++        if as_line:
++            ser.smooth = False
++            ser.format.line.color.rgb = COLORS["accent"]
++            ser.format.line.width = Pt(3)
++        else:
++            ser.format.fill.solid()
++            ser.format.fill.fore_color.rgb = COLORS["accent"]
++
++    # 1. Title
++    s1 = prs.slides.add_slide(blank)
++    background(s1, COLORS["bg_dark"])
++    text(s1, 1.0, 2.2, 11.3, 3.5, [
++        ("FINCH BUSINESS REPORT", 14, True, COLORS["gold"]),
++        (f"Sales & profit review: {filename}", 34, True, COLORS["light_text"]),
++        (f"Prepared {today}  |  Net margin: {margin_str}  |  {meta.get('total_records', 0):,} records", 16, False, COLORS["muted"]),
++    ])
++
++    # 2. Summary cards
++    s2 = new_slide("Core metrics", "Money in, money out, what you keep",
++                   "Totals calculated from the columns you selected.")
++    cards = [
++        ("TOTAL REVENUE", _money(totals.get("total_revenue", 0), currency), "Money in", COLORS["primary"], COLORS["card_bg"], False),
++        ("TOTAL COSTS", _money(totals.get("total_costs"), currency) if cost_known else "Not provided",
++         "Money spent" if cost_known else "Add a cost column to see profit", COLORS["primary"], COLORS["card_bg"], False),
++        ("NET PROFIT", _money(totals.get("net_profit"), currency) if cost_known else "n/a",
++         f"{margin_str} margin" if cost_known else "Needs costs", COLORS["success"], COLORS["primary"], True),
++    ]
++    for i, (label, value, sub, vcolor, bg, dark) in enumerate(cards):
++        shape = s2.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, Inches(0.8 + i * 4.0), Inches(2.3), Inches(3.6), Inches(3.2))
++        shape.fill.solid()
++        shape.fill.fore_color.rgb = bg
++        shape.line.fill.background()
++        tf = shape.text_frame
++        tf.word_wrap = True
++        tf.margin_left = Inches(0.3)
++        tf.margin_top = Inches(0.5)
++        for j, (txt, size, bold, color) in enumerate([
++            (label, 12, True, RGBColor(148, 163, 184) if dark else COLORS["muted"]),
++            (value, 28, True, vcolor),
++            (sub, 13, True, COLORS["success"] if dark else COLORS["accent"]),
++        ]):
++            p = tf.paragraphs[0] if j == 0 else tf.add_paragraph()
++            p.text = txt
++            p.font.size, p.font.bold, p.font.color.rgb = Pt(size), bold, color
++            p.space_after = Pt(12)
++            p.alignment = PP_ALIGN.LEFT
++
++    # 3. Categories
++    conc = facts.get("concentration", {}) or {}
++    s3 = new_slide("What sells", "Top revenue categories",
++                   conc.get("share") if rbc else "No category column was selected.")
++    if rbc:
++        top = list(rbc.items())[:6]
++        cd = CategoryChartData()
++        cd.categories = [str(k) for k, _ in top]
++        cd.add_series("Revenue", tuple(v for _, v in top))
++        gf = s3.shapes.add_chart(XL_CHART_TYPE.COLUMN_CLUSTERED, Inches(0.8), Inches(2.0), Inches(11.7), Inches(4.8), cd)
++        style_chart(gf.chart)
++
++    # 4. Trend
++    points = trend.get("points", [])
++    sub = "Add a date column to see how sales change over time."
++    if points:
++        chg = trend.get("change_pct")
++        sub = f"Latest month vs previous: {chg:+.1f}%" if chg is not None else f"Revenue by {trend.get('granularity', 'period').lower()}."
++    s4 = new_slide("Over time", "Revenue trend", sub)
++    if points:
++        cd = CategoryChartData()
++        cd.categories = [str(p["period"]) for p in points]
++        cd.add_series("Revenue", tuple(p["revenue"] for p in points))
++        gf = s4.shapes.add_chart(XL_CHART_TYPE.LINE_MARKERS, Inches(0.8), Inches(2.0), Inches(11.7), Inches(4.8), cd)
++        style_chart(gf.chart, as_line=True)
++
++    # 5. Data quality
++    s5 = new_slide("Record keeping", "How reliable are your records?",
++                   "Based on empty cells, duplicate rows and unusually large entries.")
++    health = meta.get("data_health_index", 100)
++    ring = COLORS["success"] if health >= 80 else COLORS["gold"] if health >= 60 else COLORS["danger"]
++    circle = s5.shapes.add_shape(MSO_SHAPE.OVAL, Inches(1.0), Inches(2.4), Inches(3.2), Inches(3.2))
++    circle.fill.solid()
++    circle.fill.fore_color.rgb = COLORS["card_bg"]
++    circle.line.color.rgb = ring
++    circle.line.width = Pt(4)
++    tfc = circle.text_frame
++    tfc.margin_top = Inches(0.8)
++    p = tfc.paragraphs[0]
++    p.text = f"{health}%"
++    p.font.size, p.font.bold, p.font.color.rgb = Pt(44), True, ring
++    p.alignment = PP_ALIGN.CENTER
++    p2 = tfc.add_paragraph()
++    p2.text = "data quality"
++    p2.font.size, p2.font.color.rgb = Pt(13), COLORS["muted"]
++    p2.alignment = PP_ALIGN.CENTER
++    lines = [(f"Empty cells: {meta.get('missing_cells', 0):,}", 18, True, COLORS["primary"]),
++             (f"Duplicate rows: {meta.get('duplicate_rows', 0):,}", 18, True, COLORS["primary"]),
++             (f"Unusually large rows: {meta.get('anomaly_count', 0):,}", 18, True, COLORS["primary"])]
++    for w in (facts.get("warnings") or [])[:4]:
++        lines.append((f"- {w}", 13, False, COLORS["muted"]))
++    text(s5, 5.0, 2.4, 7.6, 4.2, lines)
++
++    # 6. Saved scenarios (only when the user saved some)
++    valid = [sc for sc in (scenarios or []) if isinstance(sc, dict)][:6]
++    if valid:
++        s6 = new_slide("What-if", "Your saved plans", "Each plan shows what could happen to profit if you change price, volume or costs.")
++        rows = len(valid) + 1
++        tbl = s6.shapes.add_table(rows, 4, Inches(0.8), Inches(2.1), Inches(11.7), Inches(0.5 * rows)).table
++        for c, head in enumerate(["Plan", "Revenue", "Costs", "Profit"]):
++            tbl.cell(0, c).text = head
++        for r, sc in enumerate(valid, start=1):
++            costs_txt = _money(sc.get("costs"), currency) + (" (assumed)" if sc.get("cost_assumed") else "")
++            for c, val in enumerate([str(sc.get("scenario_name", "")), _money(sc.get("revenue"), currency),
++                                     costs_txt, _money(sc.get("net_profit"), currency)]):
++                tbl.cell(r, c).text = val
++        for r in range(rows):
++            for c in range(4):
++                for para in tbl.cell(r, c).text_frame.paragraphs:
++                    para.font.size = Pt(14)
++
++    # 7. Action plan from the numbers
++    s7 = new_slide("Next steps", "What to do next", "Generated from your numbers. Review them before acting.")
++    for i, (title, desc) in enumerate(build_actions(facts)):
++        box = s7.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, Inches(0.8 + i * 3.0), Inches(2.2), Inches(2.7), Inches(4.2))
++        box.fill.solid()
++        box.fill.fore_color.rgb = COLORS["card_bg"]
++        box.line.fill.background()
++        tf = box.text_frame
++        tf.word_wrap = True
++        tf.margin_left = Inches(0.25)
++        tf.margin_top = Inches(0.3)
++        for j, (txt, size, bold, color) in enumerate([(f"0{i + 1}", 20, True, COLORS["accent"]),
++                                                      (title, 15, True, COLORS["primary"]),
++                                                      (desc, 12, False, COLORS["muted"])]):
++            p = tf.paragraphs[0] if j == 0 else tf.add_paragraph()
++            p.text = txt
++            p.font.size, p.font.bold, p.font.color.rgb = Pt(size), bold, color
++            p.alignment = PP_ALIGN.LEFT
++            p.space_after = Pt(10)
++
++    # 8. Closing + honest disclaimer
++    s8 = prs.slides.add_slide(blank)
++    background(s8, COLORS["bg_dark"])
++    text(s8, 1.5, 2.5, 10.3, 3.2, [
++        ("Report generated by FINCH", 36, True, COLORS["light_text"]),
++        ("All figures come from the file you uploaded and the columns you selected. "
++         "They have not been audited. Check them against your own books before making financial decisions.",
++         16, False, COLORS["muted"]),
++    ])
++    for para in s8.shapes[-1].text_frame.paragraphs:
++        para.alignment = PP_ALIGN.CENTER
++
++    out = io.BytesIO()
++    prs.save(out)
++    return out.getvalue()
+diff -urN a/finch_bird.svg b/finch_bird.svg
+--- a/finch_bird.svg	1970-01-01 01:00:00.000000000 +0100
++++ b/finch_bird.svg	2026-10-15 00:21:54.723106118 +0100
+@@ -0,0 +1,22 @@
++<svg xmlns="http://www.w3.org/2000/svg" viewBox="510 115 435 350" role="img" aria-label="Geometric teal bird with orange head and rising arrow">
++  <g stroke="#ffffff" stroke-width="2" stroke-linejoin="round" stroke-linecap="round">
++    <!-- wing feathers -->
++    <polygon points="592,121 710,237 583,186" fill="#0d7f80"/>
++    <polygon points="517,167 710,237 636,286 556,268 541,214" fill="#10a3a0"/>
++    <polygon points="542,263 636,286 641,345 590,308" fill="#0d8a8a"/>
++    <path d="M555,456 C590,400 625,372 641,345 C650,370 660,385 664,405 C640,440 600,462 555,456 Z" fill="#0d7f80"/>
++    <path d="M555,456 C580,432 620,425 660,410" fill="none"/>
++    <!-- body -->
++    <path d="M710,237 C745,262 790,290 806,330 C812,372 770,400 720,402 L664,405 C650,385 641,368 641,345 L636,286 Z" fill="#14c4a8"/>
++    <path d="M710,237 L641,345 M710,237 L664,405 M710,237 L636,286" fill="none"/>
++    <path d="M740,268 C760,290 770,300 790,300" fill="none"/>
++    <!-- head -->
++    <path d="M722,232 C720,192 752,172 786,176 C806,180 818,194 821,200 L849,209 L822,224 C820,252 800,280 768,278 C740,274 722,256 722,232 Z" fill="#eda454"/>
++    <path d="M821,200 L849,209 L822,224" fill="#eda454"/>
++    <circle cx="788" cy="206" r="7.5" fill="#0a1b33" stroke="none"/>
++    <!-- arrow -->
++    <polyline points="744,283 771,313 912,182" fill="none" stroke="#ffffff" stroke-width="28" stroke-linejoin="miter" stroke-linecap="butt"/>
++    <polyline points="744,283 771,313 912,182" fill="none" stroke="#eda454" stroke-width="24" stroke-linejoin="miter" stroke-linecap="butt"/>
++    <polygon points="937,149 884,163 922,203" fill="#eda454"/>
++  </g>
++</svg>
+diff -urN a/finch_intro.py b/finch_intro.py
+--- a/finch_intro.py	2026-10-15 00:21:54.719445679 +0100
++++ b/finch_intro.py	2026-10-15 00:21:54.723076251 +0100
+@@ -2,6 +2,8 @@
+ finch_intro.py  -  animated Finch bird for Streamlit.
+ Wing flapping interval set to every 2 seconds after landing.
+ """
++import os
++
+ import streamlit as st
+ import streamlit.components.v1 as components
+ 
+@@ -129,7 +131,8 @@
+ def show_finch_intro(mode: str = "splash", height: int = 240, bg: str = "#0b0f19") -> None:
+     """Render the animated Finch bird with 2-second flap intervals."""
+     if mode == "splash":
+-        if st.session_state.get("_finch_intro_done"):
++        # Set FINCH_SPLASH=0 to switch the full-screen intro off (slow phones, demos, tests).
++        if os.getenv("FINCH_SPLASH", "1") == "0" or st.session_state.get("_finch_intro_done"):
+             return
+         st.session_state["_finch_intro_done"] = True
+         st.markdown(
+@@ -147,8 +150,7 @@
+             </style>""",
+             unsafe_allow_html=True,
+         )
+-        html = _HTML.replace("__BTN__", "none")
+-        components.html(html.replace("__BG__", bg).replace("__MARKER__", _MARKER), height=1)
++        components.html(_HTML.replace("__BG__", bg).replace("__MARKER__", _MARKER), height=1)
+     else:
+         components.html(_HTML.replace("__BG__", bg).replace("__MARKER__", "finch-banner"),
+                         height=height, scrolling=False)
+\ No newline at end of file
+diff -urN a/main.py b/main.py
+--- a/main.py	2026-10-15 00:21:54.719517629 +0100
++++ b/main.py	2026-10-15 00:21:54.723044723 +0100
+@@ -1,152 +1,157 @@
+-"""
+-FastAPI Backend (main.py) - Executive Intelligence Suite
+-Synchronized to v2.1 with Cohere command-a-03-2025 and strict payload limits.
+-"""
+-
+-import hmac
+-import json
+-import logging
+-import os
+-import time
+-from collections import defaultdict, deque
+-from typing import Optional
+-
+-import cohere
+-from fastapi import Depends, FastAPI, Header, HTTPException
+-from fastapi.concurrency import run_in_threadpool
+-from pydantic import BaseModel
+-
+-APP_VERSION = "2.1"
+-app = FastAPI(title="Executive Intelligence Backend", version=APP_VERSION)
+-logging.basicConfig(level=logging.INFO)
+-logger = logging.getLogger("uvicorn")
+-
+-COHERE_MODEL = os.getenv("COHERE_MODEL", "command-a-03-2025")
+-MAX_BODY_CHARS = 200_000
+-
+-
+-class AIAdvisoryRequest(BaseModel):
+-    verified_stats: dict
+-    saved_scenarios: Optional[list] = None
+-    currency: Optional[str] = "₦"
+-
+-
+-def require_key(x_api_key: str = Header(None)):
+-    expected = os.getenv("BACKEND_SECRET_KEY")
+-    if not expected:
+-        raise HTTPException(status_code=500, detail="Server configuration error: BACKEND_SECRET_KEY is missing.")
+-    if not x_api_key or not hmac.compare_digest(x_api_key, expected):
+-        raise HTTPException(status_code=401, detail="Unauthorized: Invalid or missing API key.")
+-
+-
+-_user_hits = defaultdict(deque)
+-_global_hits = deque()
+-
+-
+-def check_rate_limit(user: str):
+-    per_hour = int(os.getenv("AI_RATE_PER_HOUR", "10"))
+-    daily_cap = int(os.getenv("AI_DAILY_CAP", "500"))
+-    uq = _user_hits[user]
+-    now = time.time()
+-    while uq and now - uq[0] > 3600:
+-        uq.popleft()
+-    while _global_hits and now - _global_hits[0] > 86400:
+-        _global_hits.popleft()
+-        
+-    if len(uq) >= per_hour:
+-        raise HTTPException(status_code=429, detail=f"Rate limit reached ({per_hour} reports per hour).")
+-    if len(_global_hits) >= daily_cap:
+-        raise HTTPException(status_code=429, detail="Daily service capacity reached.")
+-    uq.append(now)
+-    _global_hits.append(now)
+-
+-
+-def _num(v):
+-    return v if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+-
+-
+-def sanitize_stats(stats: dict) -> dict:
+-    meta = stats.get("metadata") or {}
+-    return {
+-        "metadata": {k: meta.get(k) for k in (
+-            "total_records", "data_health_index", "missing_cells", "duplicate_rows", "anomaly_count",
+-            "revenue_column", "cost_column", "category_column", "date_column")},
+-        "totals": stats.get("totals"),
+-        "revenue_by_category": dict(list((stats.get("revenue_by_category") or {}).items())[:15]),
+-        "leaderboards": stats.get("leaderboards"),
+-        "concentration": stats.get("concentration"),
+-        "trend": stats.get("trend"),
+-        "anomaly_summary": stats.get("anomaly_summary"),
+-        "anomalies": stats.get("anomalies", [])[:5],
+-        "warnings": [str(w)[:300] for w in (stats.get("warnings") or [])[:10]],
+-    }
+-
+-
+-def sanitize_scenarios(scenarios: Optional[list]) -> list:
+-    out = []
+-    for sc in (scenarios or [])[:10]:
+-        if isinstance(sc, dict):
+-            out.append({
+-                "scenario_name": str(sc.get("scenario_name", ""))[:80],
+-                "revenue": _num(sc.get("revenue")),
+-                "costs": _num(sc.get("costs")),
+-                "net_profit": _num(sc.get("net_profit")),
+-                "margin": _num(sc.get("margin")),
+-                "cost_assumed": bool(sc.get("cost_assumed", False)),
+-            })
+-    return out
+-
+-
+-def build_prompt(stats: dict, scenarios: list, currency: str) -> str:
+-    return f"""You are a friendly, practical business advisor writing for a small business owner with no finance background.
+-Write in plain, simple English with short sentences. Avoid jargon.
+-All monetary figures use the currency symbol: {currency}.
+-Analyze ONLY the data inside the <data> tags. Do NOT invent numbers.
+-
+-<data>
+-VERIFIED DATASET FACT SHEET:
+-{json.dumps(stats, indent=1, default=str)}
+-
+-SAVED WHAT-IF SCENARIOS:
+-{json.dumps(scenarios, indent=1) if scenarios else "None provided."}
+-</data>
+-
+-Write the report in exactly these 6 markdown sections:
+-1. HOW THE BUSINESS IS DOING (money in, money spent, profit, margin)
+-2. WHAT SELLS BEST AND WHAT DOESN'T (top and weakest products or categories)
+-3. IS YOUR RECORD-KEEPING RELIABLE? (missing data, duplicates, unusually large sales / outliers)
+-4. THINGS TO WATCH OUT FOR (thin profit, relying on one product, other risks)
+-5. TRENDS AND YOUR WHAT-IF PLANS (how sales change over time and what the saved plans mean)
+-6. WHAT TO DO IN THE NEXT 30 / 60 / 90 DAYS (simple, practical steps tied to the numbers)
+-"""
+-
+-
+-def _call_cohere(api_key: str, prompt: str) -> str:
+-    co = cohere.ClientV2(api_key)
+-    resp = co.chat(model=COHERE_MODEL, messages=[{"role": "user", "content": prompt}], temperature=0.2)
+-    return resp.message.content[0].text
+-
+-
+-@app.get("/health", dependencies=[Depends(require_key)])
+-async def health_check():
+-    return {"status": "healthy", "service": "Executive Intelligence Backend", "version": APP_VERSION}
+-
+-
+-@app.post("/api/ai-advisory", dependencies=[Depends(require_key)])
+-async def generate_ai_advisory(payload: AIAdvisoryRequest, x_user_id: str = Header("anonymous")):
+-    body_str = json.dumps(payload.model_dump(), default=str)
+-    if len(body_str) > MAX_BODY_CHARS:
+-        raise HTTPException(status_code=413, detail="Payload too large. Please upload a smaller subset of records.")
+-
+-    api_key = os.getenv("COHERE_API_KEY")
+-    if not api_key:
+-        raise HTTPException(status_code=503, detail="AI service configuration missing on server.")
+-
+-    check_rate_limit(x_user_id[:64])
+-    prompt = build_prompt(sanitize_stats(payload.verified_stats), sanitize_scenarios(payload.saved_scenarios), payload.currency or "₦")
+-    try:
+-        text = await run_in_threadpool(_call_cohere, api_key, prompt)
+-        return {"advisory": text}
+-    except Exception as e:
+-        logger.error("Cohere AI error: %s", e)
++"""
++FastAPI Backend (main.py) - Executive Intelligence Suite
++v2.12: Cohere command-a-03-2025, strict payload limits, scenario margin fix, safer prompt rules.
++"""
++
++import hmac
++import json
++import logging
++import os
++import time
++from collections import defaultdict, deque
++from typing import Optional
++
++import cohere
++from fastapi import Depends, FastAPI, Header, HTTPException
++from fastapi.concurrency import run_in_threadpool
++from pydantic import BaseModel
++
++APP_VERSION = "2.12"
++app = FastAPI(title="Executive Intelligence Backend", version=APP_VERSION)
++logging.basicConfig(level=logging.INFO)
++logger = logging.getLogger("uvicorn")
++
++COHERE_MODEL = os.getenv("COHERE_MODEL", "command-a-03-2025")
++MAX_BODY_CHARS = 200_000
++
++
++class AIAdvisoryRequest(BaseModel):
++    verified_stats: dict
++    saved_scenarios: Optional[list] = None
++    currency: Optional[str] = "₦"
++
++
++def require_key(x_api_key: str = Header(None)):
++    expected = os.getenv("BACKEND_SECRET_KEY")
++    if not expected:
++        raise HTTPException(status_code=500, detail="Server configuration error: BACKEND_SECRET_KEY is missing.")
++    if not x_api_key or not hmac.compare_digest(x_api_key, expected):
++        raise HTTPException(status_code=401, detail="Unauthorized: Invalid or missing API key.")
++
++
++_user_hits = defaultdict(deque)
++_global_hits = deque()
++
++
++def check_rate_limit(user: str):
++    per_hour = int(os.getenv("AI_RATE_PER_HOUR", "10"))
++    daily_cap = int(os.getenv("AI_DAILY_CAP", "500"))
++    uq = _user_hits[user]
++    now = time.time()
++    while uq and now - uq[0] > 3600:
++        uq.popleft()
++    while _global_hits and now - _global_hits[0] > 86400:
++        _global_hits.popleft()
++        
++    if len(uq) >= per_hour:
++        raise HTTPException(status_code=429, detail=f"Rate limit reached ({per_hour} reports per hour).")
++    if len(_global_hits) >= daily_cap:
++        raise HTTPException(status_code=429, detail="Daily service capacity reached.")
++    uq.append(now)
++    _global_hits.append(now)
++
++
++def _num(v):
++    return v if isinstance(v, (int, float)) and not isinstance(v, bool) else None
++
++
++def sanitize_stats(stats: dict) -> dict:
++    meta = stats.get("metadata") or {}
++    return {
++        "metadata": {k: meta.get(k) for k in (
++            "total_records", "data_health_index", "missing_cells", "duplicate_rows", "anomaly_count",
++            "revenue_column", "cost_column", "category_column", "date_column")},
++        "totals": stats.get("totals"),
++        "revenue_by_category": dict(list((stats.get("revenue_by_category") or {}).items())[:15]),
++        "leaderboards": stats.get("leaderboards"),
++        "concentration": stats.get("concentration"),
++        "trend": stats.get("trend"),
++        "anomaly_summary": stats.get("anomaly_summary"),
++        "anomalies": [{"revenue": _num(a.get("revenue"))} for a in (stats.get("anomalies") or [])[:5] if isinstance(a, dict)],
++        "warnings": [str(w)[:300] for w in (stats.get("warnings") or [])[:10]],
++    }
++
++
++def sanitize_scenarios(scenarios: Optional[list]) -> list:
++    out = []
++    for sc in (scenarios or [])[:10]:
++        if isinstance(sc, dict):
++            out.append({
++                "scenario_name": str(sc.get("scenario_name", ""))[:80],
++                "revenue": _num(sc.get("revenue")),
++                "costs": _num(sc.get("costs")),
++                "net_profit": _num(sc.get("net_profit")),
++                "margin": _num(sc.get("margin", sc.get("profit_margin"))),
++                "cost_assumed": bool(sc.get("cost_assumed", False)),
++            })
++    return out
++
++
++def build_prompt(stats: dict, scenarios: list, currency: str) -> str:
++    return f"""You are a friendly, practical business advisor writing for a small business owner with no finance background.
++Write in plain, simple English with short sentences. Avoid jargon.
++All monetary figures use the currency symbol: {currency}.
++Analyze ONLY the data inside the <data> tags. Do NOT invent numbers.
++Rules:
++- If "cost_known" is false, say profit cannot be calculated yet and ask the owner to add costs. Never guess a profit.
++- Saved scenarios with "cost_assumed": true use an assumed cost ratio. Say so.
++- Names like "Category 1" are anonymised labels. Use them as given and do not try to guess the real names.
++- Do not give legal, tax or investment advice. Treat the figures as the owner's own records, not audited.
++
++<data>
++VERIFIED DATASET FACT SHEET:
++{json.dumps(stats, indent=1, default=str)}
++
++SAVED WHAT-IF SCENARIOS:
++{json.dumps(scenarios, indent=1) if scenarios else "None provided."}
++</data>
++
++Write the report in exactly these 6 markdown sections:
++1. HOW THE BUSINESS IS DOING (money in, money spent, profit, margin)
++2. WHAT SELLS BEST AND WHAT DOESN'T (top and weakest products or categories)
++3. IS YOUR RECORD-KEEPING RELIABLE? (missing data, duplicates, unusually large sales / outliers)
++4. THINGS TO WATCH OUT FOR (thin profit, relying on one product, other risks)
++5. TRENDS AND YOUR WHAT-IF PLANS (how sales change over time and what the saved plans mean)
++6. WHAT TO DO IN THE NEXT 30 / 60 / 90 DAYS (simple, practical steps tied to the numbers)
++"""
++
++
++def _call_cohere(api_key: str, prompt: str) -> str:
++    co = cohere.ClientV2(api_key)
++    resp = co.chat(model=COHERE_MODEL, messages=[{"role": "user", "content": prompt}], temperature=0.2)
++    return resp.message.content[0].text
++
++
++@app.get("/health", dependencies=[Depends(require_key)])
++async def health_check():
++    return {"status": "healthy", "service": "Executive Intelligence Backend", "version": APP_VERSION}
++
++
++@app.post("/api/ai-advisory", dependencies=[Depends(require_key)])
++async def generate_ai_advisory(payload: AIAdvisoryRequest, x_user_id: str = Header("anonymous")):
++    body_str = json.dumps(payload.model_dump(), default=str)
++    if len(body_str) > MAX_BODY_CHARS:
++        raise HTTPException(status_code=413, detail="Payload too large. Please upload a smaller subset of records.")
++
++    api_key = os.getenv("COHERE_API_KEY")
++    if not api_key:
++        raise HTTPException(status_code=503, detail="AI service configuration missing on server.")
++
++    check_rate_limit(x_user_id[:64])
++    prompt = build_prompt(sanitize_stats(payload.verified_stats), sanitize_scenarios(payload.saved_scenarios), payload.currency or "₦")
++    try:
++        text = await run_in_threadpool(_call_cohere, api_key, prompt)
++        return {"advisory": text}
++    except Exception as e:
++        logger.error("Cohere AI error: %s", e)
+         raise HTTPException(status_code=502, detail="The AI provider encountered an error. Please try again shortly.")
+\ No newline at end of file
+diff -urN a/pytest.ini b/pytest.ini
+--- a/pytest.ini	1970-01-01 01:00:00.000000000 +0100
++++ b/pytest.ini	2026-10-15 00:21:54.723215289 +0100
+@@ -0,0 +1,2 @@
++[pytest]
++testpaths = tests
+diff -urN a/requirements.txt b/requirements.txt
+--- a/requirements.txt	1970-01-01 01:00:00.000000000 +0100
++++ b/requirements.txt	2026-10-15 00:21:54.722968149 +0100
+@@ -0,0 +1,16 @@
++# Version ranges, not exact pins. After your first good deploy run `pip freeze > requirements.lock`
++# and install from that file in production so a surprise upgrade cannot break the app.
++streamlit>=1.38,<2
++pandas>=2.2,<4
++numpy>=1.26,<3
++plotly>=5.22,<7
++requests>=2.31,<3
++openpyxl>=3.1,<4
++python-pptx>=1.0,<2
++duckdb>=1.0,<2
++# backend (main.py)
++fastapi>=0.110,<1
++uvicorn>=0.29,<1
++cohere>=5.5,<6
++# tests
++pytest>=8,<9
+diff -urN a/sample_data.py b/sample_data.py
+--- a/sample_data.py	1970-01-01 01:00:00.000000000 +0100
++++ b/sample_data.py	2026-10-15 00:21:54.722481282 +0100
+@@ -0,0 +1,18 @@
++"""sample_data.py - a small, realistic Nigerian shop dataset for the 'Try the sample' button and tests."""
++import pandas as pd
++
++
++def get_sample_dataframe() -> pd.DataFrame:
++    rows = [
++        ("01/08/2026", "Rice (50kg)", 10, 45000, 380000),
++        ("05/08/2026", "Peak Milk 400g", 50, 3500, 130000),
++        ("10/08/2026", "Vegetable Oil (25L)", 8, 32000, 200000),
++        ("15/08/2026", "Frozen Chicken", 15, 5500, 65000),
++        ("01/09/2026", "Rice (50kg)", 12, 46000, 450000),
++        ("10/09/2026", "Vegetable Oil (25L)", 10, 32500, 250000),
++        ("20/09/2026", "Peak Milk 400g", 60, 3500, 150000),
++        ("05/10/2026", "Frozen Chicken", 20, 5500, 85000),
++    ]
++    df = pd.DataFrame(rows, columns=["Date", "Product", "Quantity", "Unit_Price", "Total_Cost"])
++    df.insert(4, "Total_Amount", df["Quantity"] * df["Unit_Price"])
++    return df[["Date", "Product", "Quantity", "Unit_Price", "Total_Amount", "Total_Cost"]]
+diff -urN a/simulator.py b/simulator.py
+--- a/simulator.py	2026-10-15 00:21:54.719606184 +0100
++++ b/simulator.py	2026-10-15 00:21:54.722910144 +0100
+@@ -1,38 +1,48 @@
+-"""
+-simulator.py - FINCH What-If Sensitivity & Simulation Engine
+-"""
+-def calculate_scenario(totals: dict, price_adj_pct: float, volume_adj_pct: float, fixed_change: float, var_pct: float, fixed_share: float, elasticity: float = 1.2):
+-    base_rev = totals.get("total_revenue", 0)
+-    base_costs = totals.get("total_costs", 0)
+-    
+-    effective_volume_adj = volume_adj_pct - (price_adj_pct * elasticity)
+-    price_multiplier = 1.0 + (price_adj_pct / 100.0)
+-    volume_multiplier = max(0.0, 1.0 + (effective_volume_adj / 100.0))
+-    
+-    sim_revenue = base_rev * price_multiplier * volume_multiplier
+-    fixed_costs = base_costs * fixed_share + fixed_change
+-    variable_costs = base_costs * (1.0 - fixed_share) * volume_multiplier * (1.0 + var_pct / 100.0)
+-    sim_costs = max(0.0, fixed_costs + variable_costs)
+-    
+-    sim_net_profit = sim_revenue - sim_costs
+-    base_profit = base_rev - base_costs
+-    
+-    return {
+-        "revenue": sim_revenue,
+-        "costs": sim_costs,
+-        "net_profit": sim_net_profit,
+-        "profit_margin": (sim_net_profit / sim_revenue * 100.0) if sim_revenue > 0 else 0.0,
+-        "profit_delta": sim_net_profit - base_profit
+-    }
+-
+-def generate_sensitivity_matrix(totals: dict, fixed_share: float, elasticity: float = 1.2):
+-    price_steps = [-20, -10, 0, 10, 20]
+-    volume_steps = [-20, -10, 0, 10, 20]
+-    matrix = []
+-    for p in price_steps:
+-        row = {"Price Change": f"{p:+}%"}
+-        for v in volume_steps:
+-            res = calculate_scenario(totals, p, v, 0.0, 0.0, fixed_share, elasticity)
+-            row[f"Vol {v:+}%"] = round(res["net_profit"], 2)
+-        matrix.append(row)
+-    return matrix
+\ No newline at end of file
++"""
++simulator.py - FINCH What-If Sensitivity & Simulation Engine (v2.12)
++
++Model (kept deliberately simple and stated in the UI):
++- Raising price lowers volume by `elasticity` x the price change (default 1.2).
++- Fixed costs stay flat; variable costs move with volume.
++"""
++
++
++def calculate_scenario(totals: dict, price_adj_pct: float, volume_adj_pct: float, fixed_change: float,
++                       var_pct: float, fixed_share: float, elasticity: float = 1.2):
++    base_rev = float(totals.get("total_revenue") or 0.0)
++    base_costs = float(totals.get("total_costs") or 0.0)
++
++    effective_volume_adj = volume_adj_pct - (price_adj_pct * elasticity)
++    price_multiplier = 1.0 + (price_adj_pct / 100.0)
++    volume_multiplier = max(0.0, 1.0 + (effective_volume_adj / 100.0))
++
++    sim_revenue = base_rev * price_multiplier * volume_multiplier
++    fixed_costs = base_costs * fixed_share + fixed_change
++    variable_costs = base_costs * (1.0 - fixed_share) * volume_multiplier * (1.0 + var_pct / 100.0)
++    sim_costs = max(0.0, fixed_costs + variable_costs)
++
++    sim_net_profit = sim_revenue - sim_costs
++    base_profit = base_rev - base_costs
++
++    return {
++        "revenue": sim_revenue,
++        "costs": sim_costs,
++        "net_profit": sim_net_profit,
++        "profit_margin": (sim_net_profit / sim_revenue * 100.0) if sim_revenue > 0 else 0.0,
++        "profit_delta": sim_net_profit - base_profit,
++        "revenue_change_pct": ((sim_revenue / base_rev - 1.0) * 100.0) if base_rev > 0 else 0.0,
++        "volume_change_pct": (volume_multiplier - 1.0) * 100.0,
++    }
++
++
++def generate_sensitivity_matrix(totals: dict, fixed_share: float, elasticity: float = 1.2):
++    price_steps = [-20, -10, 0, 10, 20]
++    volume_steps = [-20, -10, 0, 10, 20]
++    matrix = []
++    for p in price_steps:
++        row = {"Price Change": f"{p:+}%"}
++        for v in volume_steps:
++            res = calculate_scenario(totals, p, v, 0.0, 0.0, fixed_share, elasticity)
++            row[f"Vol {v:+}%"] = round(res["net_profit"], 2)
++        matrix.append(row)
++    return matrix
+diff -urN a/tests/conftest.py b/tests/conftest.py
+--- a/tests/conftest.py	1970-01-01 01:00:00.000000000 +0100
++++ b/tests/conftest.py	2026-10-15 00:21:54.721811110 +0100
+@@ -0,0 +1,4 @@
++import os
++import sys
++
++sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+diff -urN a/tests/test_analysis.py b/tests/test_analysis.py
+--- a/tests/test_analysis.py	1970-01-01 01:00:00.000000000 +0100
++++ b/tests/test_analysis.py	2026-10-15 00:21:54.722052858 +0100
+@@ -0,0 +1,129 @@
++import pandas as pd
++
++from analysis import (analyze_dataset, build_ai_payload, mask_ai_payload, parse_numeric_series,
++                      prepare_dataframe, suggest_columns, valid_numeric_columns)
++from sample_data import get_sample_dataframe
++
++
++def run(df, **override):
++    clean, notes = prepare_dataframe(df)
++    s = suggest_columns(clean)
++    s.update(override)
++    return analyze_dataset(clean, s["revenue"], s["cost"], s["category"], s["date"], notes), s
++
++
++def test_sample_data_is_read_correctly():
++    f, s = run(get_sample_dataframe())
++    assert s["revenue"] == "Total_Amount" and s["cost"] == "Total_Cost"
++    assert s["category"] == "Product" and s["date"] == "Date"
++    assert f["totals"]["total_revenue"] == 2_160_500
++    assert f["totals"]["total_costs"] == 1_710_000
++    assert f["totals"]["net_profit"] == 450_500
++    assert list(f["revenue_by_category"])[0] == "Rice (50kg)"
++    assert f["trend"]["granularity"] == "Month" and len(f["trend"]["points"]) == 3
++
++
++def test_dates_and_product_names_are_not_numeric():
++    df = get_sample_dataframe()
++    nums = valid_numeric_columns(df)
++    assert "Date" not in nums and "Product" not in nums
++
++
++def test_qty_times_unit_price_when_no_total():
++    df = pd.DataFrame({"Date": ["05/01/2026", "06/01/2026", "07/02/2026"], "Item": ["Rice", "Beans", "Soap"],
++                       "Qty": [10, 5, 20], "Unit Price": [500, 700, 300]})
++    f, s = run(df)
++    assert s["revenue"] == "Unit Price"
++    assert f["totals"]["total_revenue"] == 5000 + 3500 + 6000
++    assert f["totals"]["cost_known"] is False and f["totals"]["net_profit"] is None
++    assert f["totals"]["total_costs"] is None
++    assert s["category"] == "Item"
++
++
++def test_total_amount_beats_unit_price():
++    df = pd.DataFrame({"Qty": [1, 2], "Unit_Price": [100, 200], "Total_Amount": [100, 400]})
++    f, s = run(df)
++    assert s["revenue"] == "Total_Amount" and f["totals"]["total_revenue"] == 500
++
++
++def test_unit_cost_times_quantity():
++    df = pd.DataFrame({"Item": ["a", "b"], "Quantity": [2, 3], "Total_Amount": [1000, 900], "Unit_Cost": [100, 100]})
++    f, s = run(df)
++    assert s["cost"] == "Unit_Cost" and f["totals"]["total_costs"] == 500
++
++
++def test_total_row_and_text_amounts():
++    df = pd.DataFrame({"Date": ["05/01/2026", "06/02/2026", "07/02/2026", "Total"],
++                       "Item": ["Rice", "Soap", "Beans", "Total"],
++                       "Amount": ["₦5,000", "₦3,000", "₦3,500", "₦11,500"], "Cost": ["3,000", "2,000", "2,000", "7,000"]})
++    f, _ = run(df)
++    assert f["totals"]["total_revenue"] == 11_500 and f["totals"]["total_costs"] == 7_000
++    assert any("summary/total" in n for n in f["preparation_notes"])
++
++
++def test_blank_rows_keep_alignment():
++    df = pd.DataFrame({"Item": ["Rice", None, "Soap", "Beans"], "Amount": ["5,000", None, "3,000", "3,500"],
++                       "Cost": ["3,000", None, "2,000", "2,000"]})
++    f, _ = run(df)
++    assert f["revenue_by_category"] == {"Rice": 5000.0, "Beans": 3500.0, "Soap": 3000.0}
++
++
++def test_categories_ignore_case_and_spaces():
++    df = pd.DataFrame({"Product": ["Rice", " rice ", "RICE", "Soap"], "Amount": [10, 10, 10, 5]})
++    f, _ = run(df)
++    assert len(f["revenue_by_category"]) == 2 and sum(f["revenue_by_category"].values()) == 35
++
++
++def test_parentheses_negative_and_unreadable_warning():
++    s = parse_numeric_series(pd.Series(["(1,200)", "N/A", "₦2,500.50", "05/01/2026", "NGN 3000"]))
++    assert s.iloc[0] == -1200 and pd.isna(s.iloc[1]) and s.iloc[2] == 2500.5 and pd.isna(s.iloc[3]) and s.iloc[4] == 3000
++    df = pd.DataFrame({"Item": list("abc"), "Amount": ["100", "oops", "-50"]})
++    f, _ = run(df)
++    assert f["totals"]["total_revenue"] == 50
++    assert any("could not be read" in w for w in f["warnings"]) and any("negative" in w for w in f["warnings"])
++
++
++def test_never_picks_id_or_date_as_revenue():
++    df = pd.DataFrame({"Order_ID": [1, 2, 3], "Date": ["01/01/2026", "02/01/2026", "03/01/2026"],
++                       "Customer": ["a", "b", "c"], "Amount": [10, 20, 30]})
++    _, s = run(df)
++    assert s["revenue"] == "Amount" and s["category"] == "Customer"
++
++
++def test_iso_dates_and_daily_trend():
++    df = pd.DataFrame({"Date": pd.date_range("2026-03-01", periods=10), "Amount": range(1, 11)})
++    f, _ = run(df)
++    assert f["trend"]["granularity"] == "Day" and len(f["trend"]["points"]) == 10
++
++
++def test_masking_removes_every_category_name():
++    f, _ = run(get_sample_dataframe())
++    payload = mask_ai_payload(build_ai_payload(f))
++    text = str(payload)
++    for name in ("Rice", "Peak Milk", "Vegetable Oil", "Frozen Chicken"):
++        assert name not in text
++    assert "Category 1" in payload["revenue_by_category"]
++    assert build_ai_payload(f, mask=True) == payload
++
++
++def test_ai_payload_has_no_raw_rows():
++    f, _ = run(get_sample_dataframe())
++    p = build_ai_payload(f)
++    assert all(set(a) == {"revenue"} for a in p["anomalies"])
++
++
++def test_empty_cost_is_never_zero():
++    f, _ = run(pd.DataFrame({"Item": ["a", "b"], "Amount": [1, 2]}))
++    assert f["totals"]["total_costs"] is None and f["totals"]["profit_margin"] is None
++
++
++def test_european_decimal_column_is_read_consistently():
++    s = parse_numeric_series(pd.Series(["1.234,50", "2.000,00", "999,99"]))
++    assert list(s) == [1234.5, 2000.0, 999.99]
++    assert list(parse_numeric_series(pd.Series(["1,234.50", "2,000", "999"]))) == [1234.5, 2000.0, 999.0]
++
++
++def test_price_column_with_quantity_synonym():
++    df = pd.DataFrame({"Date": ["01/02/2026"] * 3, "Product": list("xyz"), "Qty Sold": [2, 3, 4], "Selling Price": [100, 200, 300]})
++    f, s = run(df)
++    assert f["totals"]["total_revenue"] == 2 * 100 + 3 * 200 + 4 * 300
+diff -urN a/tests/test_backend.py b/tests/test_backend.py
+--- a/tests/test_backend.py	1970-01-01 01:00:00.000000000 +0100
++++ b/tests/test_backend.py	2026-10-15 00:21:54.722332311 +0100
+@@ -0,0 +1,55 @@
++"""Pure-logic tests for main.py. Skipped automatically if fastapi/cohere are not installed."""
++import json
++import os
++
++try:
++    import main
++except Exception:  # pragma: no cover
++    main = None
++
++from analysis import analyze_dataset, build_ai_payload, prepare_dataframe, suggest_columns
++from sample_data import get_sample_dataframe
++
++
++def _facts():
++    c, n = prepare_dataframe(get_sample_dataframe())
++    s = suggest_columns(c)
++    return analyze_dataset(c, s["revenue"], s["cost"], s["category"], s["date"], n)
++
++
++def test_sanitize_keeps_scenario_margin():
++    if main is None:
++        return
++    out = main.sanitize_scenarios([{"scenario_name": "A", "revenue": 1.0, "costs": 1.0, "net_profit": 0.0, "profit_margin": 12.5}])
++    assert out[0]["margin"] == 12.5
++
++
++def test_masked_payload_stays_masked_through_the_backend():
++    if main is None:
++        return
++    payload = build_ai_payload(_facts(), mask=True)
++    prompt = main.build_prompt(main.sanitize_stats(payload), [], "₦")
++    for name in ("Rice", "Peak Milk", "Vegetable Oil", "Frozen Chicken"):
++        assert name not in prompt
++    assert "Category 1" in prompt and "cost_known" in prompt
++
++
++def test_payload_has_no_row_numbers():
++    if main is None:
++        return
++    stats = main.sanitize_stats(build_ai_payload(_facts()))
++    assert "row_index" not in json.dumps(stats)
++
++
++def test_rate_limit_blocks_after_limit():
++    if main is None:
++        return
++    os.environ["AI_RATE_PER_HOUR"] = "2"
++    main._user_hits.clear()
++    main.check_rate_limit("u1"); main.check_rate_limit("u1")
++    try:
++        main.check_rate_limit("u1")
++        raise AssertionError("should have been limited")
++    except main.HTTPException as e:
++        assert e.status_code == 429
++    main.check_rate_limit("u2")
+diff -urN a/tests/test_database.py b/tests/test_database.py
+--- a/tests/test_database.py	1970-01-01 01:00:00.000000000 +0100
++++ b/tests/test_database.py	2026-10-15 00:21:54.721583828 +0100
+@@ -0,0 +1,178 @@
++import datetime
++import os
++import tempfile
++
++import database as db
++
++
++def fresh():
++    db.DB_PATH = os.path.join(tempfile.mkdtemp(), "t.duckdb")
++    db._initialised.clear()
++    db.init_db()
++
++
++def test_register_and_login():
++    fresh()
++    assert db.create_user("Ada", "ada@shop.ng", "Sunshine77")
++    assert not db.create_user("ada", "other@shop.ng", "Sunshine77")      # duplicate username
++    assert not db.create_user("bob", "ADA@shop.ng", "Sunshine77")        # duplicate email
++    assert db.verify_user("ADA", "Sunshine77") == "ada"
++    assert db.verify_user("ada@shop.ng", "Sunshine77") == "ada"
++    assert db.verify_user("ada", "wrong-pass") is None
++    assert db.verify_user("nobody", "Sunshine77") is None
++
++
++def test_weak_passwords_rejected():
++    fresh()
++    for bad in ("short1", "12345678", "password", "99999999"):
++        assert db.password_problem(bad)
++    assert not db.create_user("zed", "z@z.ng", "12345678")
++    assert db.password_problem("ada12345", "ada12345")
++    assert db.password_problem("Sunshine77", "ada") is None
++
++
++def test_lockout_after_five_failures():
++    fresh()
++    db.create_user("ada", "ada@shop.ng", "Sunshine77")
++    for _ in range(5):
++        assert db.verify_user("ada", "nope-nope") is None
++    assert db.login_locked("ada")
++    assert db.verify_user("ada", "Sunshine77") is None        # correct password still refused while locked
++    assert db.login_locked("ghost") is False
++    for _ in range(5):
++        db.verify_user("ghost", "x")
++    assert db.login_locked("ghost")                           # unknown names are throttled too
++
++
++def test_success_clears_failures():
++    fresh()
++    db.create_user("ada", "ada@shop.ng", "Sunshine77")
++    for _ in range(3):
++        db.verify_user("ada", "bad-bad-bad")
++    assert db.verify_user("ada", "Sunshine77") == "ada"
++    for _ in range(3):
++        db.verify_user("ada", "bad-bad-bad")
++    assert not db.login_locked("ada")
++
++
++def test_legacy_hash_still_works_and_is_upgraded():
++    fresh()
++    import hashlib
++    salt = "ab" * 16
++    legacy = hashlib.pbkdf2_hmac("sha256", b"OldPass123", bytes.fromhex(salt), 100000).hex()
++    with db.get_connection() as c:
++        c.execute("INSERT INTO tenants (username, email, password_hash, salt) VALUES (?, ?, ?, ?)",
++                  ["old", "old@x.ng", legacy, salt])
++    assert db.verify_user("old", "OldPass123") == "old"
++    with db.get_connection() as c:
++        stored = c.execute("SELECT password_hash FROM tenants WHERE username='old'").fetchone()[0]
++    assert stored.startswith("pbkdf2$200000$")
++    assert db.verify_user("old", "OldPass123") == "old"
++
++
++def test_sessions_expire_and_revoke():
++    fresh()
++    db.create_user("ada", "ada@shop.ng", "Sunshine77")
++    t = db.create_session("ada")
++    assert db.get_session_user(t) == "ada"
++    assert db.get_session_user("forged-token") is None and db.get_session_user("") is None
++    assert db.get_session_user("ada") is None                 # a username is NOT a valid token
++    db.delete_session(t)
++    assert db.get_session_user(t) is None
++    old = db.create_session("ada", hours=-1)
++    assert db.get_session_user(old) is None
++    with db.get_connection() as c:                             # only a hash is stored
++        assert t not in str(c.execute("SELECT * FROM sessions").fetchall())
++
++
++def test_password_reset_flow():
++    fresh()
++    db.create_user("ada", "ada@shop.ng", "Sunshine77")
++    s = db.create_session("ada")
++    assert db.create_reset_code("nobody") is None
++    user, code = db.create_reset_code("ada@shop.ng")
++    assert user == "ada"
++    assert not db.redeem_reset_code("ada", "WRONGCODE", "NewPass2026")
++    assert not db.redeem_reset_code("ada", code, "123")        # weak new password refused
++    assert db.redeem_reset_code("ada", code.lower(), "NewPass2026")
++    assert not db.redeem_reset_code("ada", code, "Another2026")  # one-time
++    assert db.verify_user("ada", "NewPass2026") == "ada" and db.verify_user("ada", "Sunshine77") is None
++    assert db.get_session_user(s) is None                      # old sessions revoked
++
++
++def test_reset_code_guessing_is_throttled():
++    fresh()
++    db.create_user("ada", "ada@shop.ng", "Sunshine77")
++    _, code = db.create_reset_code("ada")
++    for i in range(5):
++        assert not db.redeem_reset_code("ada", f"BAD{i}BAD0", "NewPass2026")
++    assert not db.redeem_reset_code("ada", code, "NewPass2026")
++
++
++def test_expired_reset_code():
++    fresh()
++    db.create_user("ada", "ada@shop.ng", "Sunshine77")
++    _, code = db.create_reset_code("ada")
++    with db.get_connection() as c:
++        c.execute("UPDATE reset_codes SET expires_at = ?", [datetime.datetime(2000, 1, 1)])
++    assert not db.redeem_reset_code("ada", code, "NewPass2026")
++
++
++def test_scenarios_roundtrip_and_isolation():
++    fresh()
++    db.save_scenario_db("ada", "Price +5%", "k1", {"revenue": 10.0, "costs": 5.0, "net_profit": 5.0, "profit_margin": 50.0, "cost_assumed": True})
++    db.save_scenario_db("ada", "Second", "k1", {"revenue": 1.0})
++    db.save_scenario_db("bob", "Bob's", "k1", {"revenue": 99.0})
++    got = db.load_scenarios_db("ada", "k1")
++    assert [g["scenario_name"] for g in got] == ["Price +5%", "Second"]
++    assert got[0]["margin"] == 50.0 and got[0]["cost_assumed"] is True
++    assert db.load_scenarios_db("ada", "other-file") == []
++    db.delete_scenarios_db("ada", "k1")
++    assert db.load_scenarios_db("ada", "k1") == [] and len(db.load_scenarios_db("bob", "k1")) == 1
++
++
++def test_history_keeps_unknown_profit_as_null():
++    fresh()
++    db.save_audit_history_db("a@x.ng", "Independent SME", "f.csv", {"total_revenue": 100.0, "net_profit": None, "profit_margin": None}, "s")
++    h = db.load_user_history_db("a@x.ng")
++    assert h[0]["net_profit"] is None and h[0]["total_revenue"] == 100.0
++    assert db.load_user_history_db("someone@else.ng") == []
++
++
++def test_export_and_delete_my_data():
++    fresh()
++    db.create_user("ada", "ada@shop.ng", "Sunshine77")
++    db.create_user("bob", "bob@shop.ng", "Sunshine88")
++    db.save_scenario_db("ada", "S", "k", {"revenue": 1.0})
++    db.save_scenario_db("bob", "B", "k", {"revenue": 2.0})
++    db.save_audit_history_db("ada@shop.ng", "x", "f.csv", {"total_revenue": 1.0}, "s")
++    db.save_audit_history_db("bob@shop.ng", "x", "g.csv", {"total_revenue": 2.0}, "s")
++    db.save_feedback_db("ada", "great")
++    tok = db.create_session("ada")
++    data = db.export_user_data("ada")
++    assert data["account"]["email"] == "ada@shop.ng" and len(data["scenarios"]) == 1 and len(data["reports"]) == 1
++    assert "password_hash" not in str(data) and "salt" not in str(data)
++    db.delete_user_data("ada")
++    assert db.verify_user("ada", "Sunshine77") is None and db.get_session_user(tok) is None
++    assert db.load_scenarios_db("ada", "k") == [] and db.load_user_history_db("ada@shop.ng") == []
++    assert len(db.load_scenarios_db("bob", "k")) == 1 and len(db.load_user_history_db("bob@shop.ng")) == 1
++    assert db.verify_user("bob", "Sunshine88") == "bob"
++
++
++def test_admin_overview_and_activity():
++    fresh()
++    db.create_user("ada", "ada@shop.ng", "Sunshine77")
++    db.log_tenant_activity("ada@shop.ng", "upload", increment_upload=True)
++    db.log_tenant_activity("ada@shop.ng", "upload", increment_upload=True)
++    rows = db.get_tenants_overview()
++    assert rows[0]["email"] == "ada@shop.ng" and rows[0]["total_uploads"] == 2
++
++
++def test_backup_creates_files():
++    import duckdb
++    if getattr(duckdb, "__SHIM__", False):
++        return  # needs real DuckDB (EXPORT DATABASE)
++    fresh()
++    db.create_user("ada", "ada@shop.ng", "Sunshine77")
++    path = db.backup_database(os.path.join(tempfile.mkdtemp(), "bk"))
++    assert os.path.exists(os.path.join(path, "schema.sql"))
+diff -urN a/tests/test_deck.py b/tests/test_deck.py
+--- a/tests/test_deck.py	1970-01-01 01:00:00.000000000 +0100
++++ b/tests/test_deck.py	2026-10-15 00:21:54.722250218 +0100
+@@ -0,0 +1,47 @@
++import io
++
++from pptx import Presentation
++
++from analysis import analyze_dataset, prepare_dataframe, suggest_columns
++from deck_builder import build_actions, create_executive_deck
++from sample_data import get_sample_dataframe
++
++
++def facts_for(df):
++    clean, notes = prepare_dataframe(df)
++    s = suggest_columns(clean)
++    return analyze_dataset(clean, s["revenue"], s["cost"], s["category"], s["date"], notes)
++
++
++def slides(blob):
++    return Presentation(io.BytesIO(blob)).slides
++
++
++def test_full_deck_builds():
++    f = facts_for(get_sample_dataframe())
++    sc = [{"scenario_name": "Price +5%", "revenue": 1.0, "costs": 1.0, "net_profit": 0.0, "cost_assumed": False}]
++    assert len(slides(create_executive_deck(f, "₦", "shop.csv", sc))) == 8
++
++
++def test_deck_without_scenarios_has_seven_slides():
++    assert len(slides(create_executive_deck(facts_for(get_sample_dataframe()), "₦", "shop.csv", []))) == 7
++
++
++def test_deck_without_costs_category_or_date():
++    import pandas as pd
++    f = facts_for(pd.DataFrame({"Amount": [1, 2, 3]}))
++    assert len(slides(create_executive_deck(f, "$", "x.csv"))) >= 7
++
++
++def test_actions_follow_the_numbers():
++    f = facts_for(get_sample_dataframe())
++    titles = [t for t, _ in build_actions(f)]
++    assert 1 <= len(titles) <= 4
++    f["totals"]["cost_known"] = False
++    assert build_actions(f)[0][0] == "Add your costs"
++
++
++def test_deck_does_not_claim_verification():
++    blob = create_executive_deck(facts_for(get_sample_dataframe()), "₦", "shop.csv", [])
++    text = " ".join(sh.text_frame.text for s in slides(blob) for sh in s.shapes if sh.has_text_frame)
++    assert "Verified" not in text and "not been audited" in text
+diff -urN a/tests/test_simulator.py b/tests/test_simulator.py
+--- a/tests/test_simulator.py	1970-01-01 01:00:00.000000000 +0100
++++ b/tests/test_simulator.py	2026-10-15 00:21:54.722137115 +0100
+@@ -0,0 +1,24 @@
++from simulator import calculate_scenario, generate_sensitivity_matrix
++
++T = {"total_revenue": 1000.0, "total_costs": 600.0}
++
++
++def test_no_change_is_baseline():
++    r = calculate_scenario(T, 0, 0, 0, 0, 0.3)
++    assert r["revenue"] == 1000 and r["costs"] == 600 and r["net_profit"] == 400 and r["profit_delta"] == 0
++
++
++def test_price_rise_cuts_volume_by_elasticity():
++    r = calculate_scenario(T, 10, 0, 0, 0, 0.3, elasticity=1.2)
++    assert round(r["volume_change_pct"], 6) == -12.0
++    assert round(r["revenue"], 6) == round(1000 * 1.10 * 0.88, 6)
++
++
++def test_unknown_costs_do_not_crash():
++    r = calculate_scenario({"total_revenue": 500.0, "total_costs": None}, 5, 0, 0, 0, 0.3)
++    assert r["costs"] == 0 and r["net_profit"] == r["revenue"]
++
++
++def test_matrix_shape():
++    m = generate_sensitivity_matrix(T, 0.3)
++    assert len(m) == 5 and len(m[0]) == 6
