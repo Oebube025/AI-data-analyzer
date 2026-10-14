@@ -1,6 +1,6 @@
 """
 finch_intro.py  -  animated Finch bird for Streamlit.
-Removes replay button, adds periodic wing-flapping every 10 seconds after landing.
+Wing flapping interval set to every 2 seconds after landing.
 """
 import streamlit as st
 import streamlit.components.v1 as components
@@ -93,16 +93,16 @@ _HTML = """<!DOCTYPE html>
       if (!landed) land();
       place(W * 0.5, H * 0.5 + Math.sin(t * 2.2) * 3, 0);
       
-      // Periodic wing flap every 10 seconds for 1.5 seconds
+      // Periodic wing flap every 2 seconds for 0.8 seconds
       var now = Date.now();
-      if (!isFlapping && now - lastFlapTime >= 10000) {
+      if (!isFlapping && now - lastFlapTime >= 2000) {
         isFlapping = true;
         flappingTimer = now;
       }
       if (isFlapping) {
         var elapsedFlap = (now - flappingTimer) / 1000;
-        if (elapsedFlap < 1.5) {
-          phase += 2 * Math.PI * 10 * dt;
+        if (elapsedFlap < 0.8) {
+          phase += 2 * Math.PI * 12 * dt;
           setWing(Math.sin(phase) * 22);
         } else {
           isFlapping = false;
@@ -127,7 +127,7 @@ _HTML = """<!DOCTYPE html>
 
 
 def show_finch_intro(mode: str = "splash", height: int = 240, bg: str = "#0b0f19") -> None:
-    """Render the animated Finch bird without a replay button."""
+    """Render the animated Finch bird with 2-second flap intervals."""
     if mode == "splash":
         if st.session_state.get("_finch_intro_done"):
             return
