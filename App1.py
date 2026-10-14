@@ -449,8 +449,13 @@ with tabs[3]:
     saved = load_scenarios_db(USER, data_key)
     if saved:
         st.markdown("### 📊 Your Saved Scenarios (This Dataset)")
-        st.dataframe(pd.DataFrame(saved)[["scenario_name", "revenue", "costs", "net_profit", "margin"]],
-                     use_container_width=True)
+        sdf = pd.DataFrame(saved)
+        if "profit_margin" in sdf.columns:
+            sdf["margin"] = sdf["profit_margin"]
+        
+        display_cols = [c for c in ["scenario_name", "revenue", "costs", "net_profit", "margin"] if c in sdf.columns]
+        st.dataframe(sdf[display_cols], use_container_width=True)
+        
         if st.button("🗑️ Delete all my saved scenarios for this dataset"):
             delete_scenarios_db(USER, data_key)
             st.rerun()
