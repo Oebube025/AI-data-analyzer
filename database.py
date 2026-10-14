@@ -52,6 +52,14 @@ def init_db():
                 summary TEXT
             )
         """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS feedback (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username VARCHAR,
+                feedback_text TEXT,
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
 
 def hash_password(password: str, salt: str = None) -> tuple:
     if not salt:
@@ -129,6 +137,13 @@ def load_scenarios_db(username: str, data_key: str) -> list:
 def delete_scenarios_db(username: str, data_key: str):
     with get_connection() as conn:
         conn.execute("DELETE FROM scenarios WHERE username = ? AND data_key = ?", (username, data_key))
+
+def save_feedback_db(username: str, feedback_text: str):
+    with get_connection() as conn:
+        conn.execute(
+            "INSERT INTO feedback (username, feedback_text) VALUES (?, ?)",
+            (username, feedback_text)
+        )
 
 def log_tenant_activity(email: str, activity: str, increment_upload: bool = False):
     with get_connection() as conn:
