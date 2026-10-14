@@ -117,7 +117,7 @@ def load_scenarios_db(username: str, data_key: str) -> list:
     with get_connection() as conn:
         rows = conn.execute(
             "SELECT scenario_name, payload FROM scenarios WHERE username = ? AND data_key = ?",
-            (username, data_key)
+            [username, data_key]
         ).fetchall()
         res = []
         for r in rows:
