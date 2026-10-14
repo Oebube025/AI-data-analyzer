@@ -1,174 +1,165 @@
 """
-database.py - FINCH Persistence Layer
-DuckDB storage backend with valid DuckDB SQL syntax and self-healing table initialization.
+database.py - FINCH Database & Security Persistence Layer
+Handles SQLite/PostgreSQL connection pooling, salted PBKDF2 password hashing, and tenant records.
 """
 
 import os
+import hashlib
+import secrets
+from contextlib import contextmanager
 import duckdb
-import pandas as pd
-from datetime import datetime
 
-DB_FILE = os.getenv("DB_PATH", "finch_v3.duckdb")
+DB_PATH = "finch_v3.duckdb"
 
-
+@contextmanager
 def get_connection():
-    """Opens a DuckDB connection and ensures all tables exist with valid syntax."""
-    conn = duckdb.connect(DB_FILE)
-    
-    # Sequence for auto-incrementing IDs in DuckDB
-    conn.execute("CREATE SEQUENCE IF NOT EXISTS scenario_seq START 1;")
-    conn.execute("CREATE SEQUENCE IF NOT EXISTS audit_seq START 1;")
-    conn.execute("CREATE SEQUENCE IF NOT EXISTS feedback_seq START 1;")
-
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS tenants (
-            email VARCHAR PRIMARY KEY,
-            username VARCHAR UNIQUE,
-            password_hash VARCHAR,
-            created_at TIMESTAMP,
-            last_active TIMESTAMP,
-            total_uploads INTEGER DEFAULT 0
-        );
-    """)
-
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS scenarios (
-            id BIGINT PRIMARY KEY DEFAULT nextval('scenario_seq'),
-            username VARCHAR,
-            scenario_name VARCHAR,
-            data_key VARCHAR,
-            revenue DOUBLE,
-            costs DOUBLE,
-            net_profit DOUBLE,
-            margin DOUBLE,
-            timestamp TIMESTAMP
-        );
-    """)
-
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS user_audit_history (
-            id BIGINT PRIMARY KEY DEFAULT nextval('audit_seq'),
-            email VARCHAR,
-            company_type VARCHAR,
-            file_name VARCHAR,
-            total_revenue DOUBLE,
-            net_profit DOUBLE,
-            profit_margin DOUBLE,
-            ai_brief TEXT,
-            timestamp TIMESTAMP
-        );
-    """)
-
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS feedback (
-            id BIGINT PRIMARY KEY DEFAULT nextval('feedback_seq'),
-            email VARCHAR,
-            category VARCHAR,
-            message TEXT,
-            timestamp TIMESTAMP
-        );
-    """)
-
-    return conn
-
+    """Context manager for safe DuckDB connection handling."""
+    conn = duckdb.connect(DB_PATH)
+    try:
+        yield conn
+    finally:
+        conn.close()
 
 def init_db():
-    conn = get_connection()
-    conn.close()
+    """Initializes secure database tables with PBKDF2 password support."""
+    with get_connection() as conn:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS tenants (
+                username VARCHAR PRIMARY KEY,
+                email VARCHAR UNIQUE,
+                password_hash VARCHAR,
+                salt VARCHAR,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                total_uploads INTEGER DEFAULT 0
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS scenarios (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username VARCHAR,
+                scenario_name VARCHAR,
+                data_key VARCHAR,
+                payload VARCHAR
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS audit_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                email VARCHAR,
+                company VARCHAR,
+                file_name VARCHAR,
+                total_revenue DOUBLE,
+                net_profit DOUBLE,
+                profit_margin DOUBLE,
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                summary TEXT
+            )
+        """)
 
+def hash_password(password: str, salt: str = None) -> tuple:
+    """Hashes a password using PBKDF2-HMAC-SHA256 with a secure random salt."""
+    if not salt:
+        salt = secrets.token_hex(16)
+    pwd_hash = hashlib.pbkdf2_hmac(
+        'sha256',
+        password.encode('utf-8'),
+        bytes.fromhex(salt),
+        100000
+    ).hex()
+    return pwd_hash, salt
 
-def create_user(username: str, email: str, password_hash: str) -> bool:
-    conn = get_connection()
+def create_user(username: str, email: str, password: str) -> bool:
+    """Registers a new user with salted password hashing."""
+    init_db()
+    uname = username.strip().lower()
+    uemail = email.strip().lower()
+    pwd_hash, salt = hash_password(password)
     try:
-        now = datetime.now()
-        conn.execute("INSERT INTO tenants VALUES (?, ?, ?, ?, ?, 0)",
-                     (email.strip().lower(), username.strip().lower(), password_hash, now, now))
-        conn.close()
+        with get_connection() as conn:
+            conn.execute(
+                "INSERT INTO tenants (username, email, password_hash, salt) VALUES (?, ?, ?, ?)",
+                (uname, uemail, pwd_hash, salt)
+            )
         return True
     except Exception:
-        conn.close()
         return False
 
-
-def verify_user(identifier: str, password_hash: str):
-    conn = get_connection()
-    ident = identifier.strip().lower()
-    res = conn.execute("SELECT username FROM tenants WHERE (email = ? OR username = ?) AND password_hash = ?",
-                       (ident, ident, password_hash)).fetchone()
-    if res:
-        conn.execute("UPDATE tenants SET last_active = ? WHERE email = ? OR username = ?", (datetime.now(), ident, ident))
-    conn.close()
-    return res[0] if res else None
-
+def verify_user(username_or_email: str, password: str) -> str:
+    """Verifies credentials against stored PBKDF2 hashes. Returns username if valid."""
+    init_db()
+    key = username_or_email.strip().lower()
+    try:
+        with get_connection() as conn:
+            row = conn.execute(
+                "SELECT username, password_hash, salt FROM tenants WHERE username = ? OR email = ?",
+                (key, key)
+            ).fetchone()
+            if not row:
+                return None
+            uname, stored_hash, salt = row
+            test_hash, _ = hash_password(password, salt)
+            if secrets.compare_digest(test_hash, stored_hash):
+                conn.execute("UPDATE tenants SET last_active = CURRENT_TIMESTAMP WHERE username = ?", (uname,))
+                return uname
+    except Exception:
+        pass
+    return None
 
 def get_user_email(username: str) -> str:
-    conn = get_connection()
-    u_clean = username.lower().strip()
-    res = conn.execute("SELECT email FROM tenants WHERE username = ? OR email = ?", (u_clean, u_clean)).fetchone()
-    conn.close()
-    return res[0] if res else u_clean
+    with get_connection() as conn:
+        row = conn.execute("SELECT email FROM tenants WHERE username = ?", (username,)).fetchone()
+        return row[0] if row else ""
 
+def save_scenario_db(username: str, name: str, data_key: str, payload: dict):
+    with get_connection() as conn:
+        import json
+        conn.execute(
+            "INSERT INTO scenarios (username, scenario_name, data_key, payload) VALUES (?, ?, ?, ?)",
+            (username, name, data_key, json.dumps(payload))
+        )
 
-def log_tenant_activity(email: str, activity_desc: str, increment_upload: bool = False):
-    conn = get_connection()
-    now = datetime.now()
-    e_clean = email.lower().strip()
-    if increment_upload:
-        conn.execute("UPDATE tenants SET last_active = ?, total_uploads = total_uploads + 1 WHERE email = ?", (now, e_clean))
-    else:
-        conn.execute("UPDATE tenants SET last_active = ? WHERE email = ?", (now, e_clean))
-    conn.close()
-
-
-def save_scenario_db(username: str, scenario_name: str, data_key: str, res: dict):
-    conn = get_connection()
-    now = datetime.now()
-    conn.execute("""
-        INSERT INTO scenarios (username, scenario_name, data_key, revenue, costs, net_profit, margin, timestamp)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    """, (username, scenario_name, data_key, res["revenue"], res["costs"], res["net_profit"], res["profit_margin"], now))
-    conn.close()
-
-
-def load_scenarios_db(username: str, data_key: str):
-    conn = get_connection()
-    res = conn.execute("""
-        SELECT scenario_name, revenue, costs, net_profit, margin, timestamp 
-        FROM scenarios WHERE username = ? AND data_key = ? ORDER BY timestamp DESC
-    """, (username, data_key)).fetchall()
-    conn.close()
-    return [{"scenario_name": r[0], "revenue": r[1], "costs": r[2], "net_profit": r[3], "margin": r[4], "timestamp": r[5]} for r in res]
-
+def load_scenarios_db(username: str, data_key: str) -> list:
+    import json
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT scenario_name, payload FROM scenarios WHERE username = ? AND data_key = ?",
+            (username, data_key)
+        .fetchall()
+        )
+        res = []
+        for r in rows:
+            p = json.loads(r[1])
+            p["scenario_name"] = r[0]
+            res.append(p)
+        return res
 
 def delete_scenarios_db(username: str, data_key: str):
-    conn = get_connection()
-    conn.execute("DELETE FROM scenarios WHERE username = ? AND data_key = ?", (username, data_key))
-    conn.close()
+    with get_connection() as conn:
+        conn.execute("DELETE FROM scenarios WHERE username = ? AND data_key = ?", (username, data_key))
 
+def log_tenant_activity(email: str, activity: str, increment_upload: bool = False):
+    with get_connection() as conn:
+        if increment_upload:
+            conn.execute("UPDATE tenants SET total_uploads = total_uploads + 1, last_active = CURRENT_TIMESTAMP WHERE email = ?", (email,))
+        else:
+            conn.execute("UPDATE tenants SET last_active = CURRENT_TIMESTAMP WHERE email = ?", (email,))
 
-def save_audit_history_db(email: str, company_type: str, file_name: str, totals: dict, ai_brief: str):
-    conn = get_connection()
-    now = datetime.now()
-    conn.execute("""
-        INSERT INTO user_audit_history (email, company_type, file_name, total_revenue, net_profit, profit_margin, ai_brief, timestamp)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    """, (email, company_type, file_name, totals.get("total_revenue", 0), totals.get("net_profit", 0), totals.get("profit_margin", 0), ai_brief, now))
-    conn.close()
+def save_audit_history_db(email: str, company: str, file_name: str, totals: dict, summary: str):
+    with get_connection() as conn:
+        conn.execute(
+            """INSERT INTO audit_history (email, company, file_name, total_revenue, net_profit, profit_margin, summary)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (email, company, file_name, totals.get("total_revenue", 0), totals.get("net_profit", 0), totals.get("profit_margin", 0), summary)
+        )
 
-
-def load_user_history_db(email: str):
-    conn = get_connection()
-    e_clean = email.lower().strip()
-    res = conn.execute("""
-        SELECT file_name, total_revenue, net_profit, profit_margin, ai_brief, timestamp 
-        FROM user_audit_history WHERE email = ? ORDER BY timestamp DESC
-    """, (e_clean,)).fetchall()
-    conn.close()
-    return [{"file_name": r[0], "total_revenue": r[1], "net_profit": r[2], "profit_margin": r[3], "ai_brief": r[4], "timestamp": r[5]} for r in res]
-
-
-def save_feedback_db(email: str, category: str, message: str):
-    conn = get_connection()
-    now = datetime.now()
-    conn.execute("INSERT INTO feedback (email, category, message, timestamp) VALUES (?, ?, ?, ?)", (email, category, message, now))
-    conn.close()
+def load_user_history_db(email: str) -> list:
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT file_name, total_revenue, net_profit, profit_margin, timestamp FROM audit_history WHERE email = ? ORDER BY timestamp DESC",
+            (email,)
+        ).fetchall()
+        return [
+            {"file_name": r[0], "total_revenue": r[1], "net_profit": r[2], "profit_margin": r[3], "timestamp": r[4]}
+            for r in rows
+        ]

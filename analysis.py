@@ -1,39 +1,53 @@
 """
 analysis.py - FINCH Data Analysis & Parsing Engine
-Handles data cleaning, numeric series detection, anomaly detection, and AI payload compilation.
+Handles robust total-row stripping, word-boundary ID protection, IQR anomaly detection, and payload assembly.
 """
 
 import re
 import pandas as pd
 import numpy as np
 
-FORBIDDEN_COL_PATTERNS = re.compile(r"(id|code|zip|phone|date|status|email|year|month|day|index|ref)", re.IGNORECASE)
+# Strict word-boundary ID filter so "Amount Paid" or "Provider Fee" are never excluded
+FORBIDDEN_COL_PATTERNS = re.compile(r"\b(id|code|zip|phone|status|email|year|month|day|index|ref)\b", re.IGNORECASE)
 
 def prepare_dataframe(df: pd.DataFrame):
-    """Cleans dataframe columns and parses numeric/date types safely."""
+    """Cleans dataframe columns, strips summary rows, and parses types safely."""
     notes = []
     df = df.copy()
     
-    # Strip whitespace from column headers
     df.columns = [str(c).strip() for c in df.columns]
     
-    # Drop completely empty rows and columns
     before_rows = len(df)
     df.dropna(how="all", inplace=True)
+    
+    # Strip summary / grand total rows
+    if len(df) > 0:
+        for col in df.columns:
+            if not pd.api.types.is_numeric_dtype(df[col]):
+                mask = df[col].astype(str).str.contains(r"^(total|grand total|sum|subtotal)$", case=False, na=False, regex=True)
+                if mask.any():
+                    df = df[~mask]
+                    notes.append(f"Removed {mask.sum()} summary/total row(s) detected in column '{col}'.")
+                    break
+
     if len(df) < before_rows:
-        notes.append(f"Removed {before_rows - len(df)} completely empty rows.")
+        notes.append(f"Removed {before_rows - len(df)} empty/summary rows.")
 
     return df, notes
 
 def parse_numeric_series(series: pd.Series) -> pd.Series:
-    """Safely parses numeric columns, handling currency symbols, commas, and European formats."""
+    """Safely parses numeric columns, protecting alphanumeric IDs and handling formats."""
     if pd.api.types.is_numeric_dtype(series):
         return pd.to_numeric(series, errors="coerce")
     
+    # Check if series contains alphanumeric ID strings (e.g. INV-0042)
+    sample = series.dropna().astype(str)
+    if any(re.search(r"[A-Za-z]", s) for s in sample.head(10)):
+        return pd.Series([np.nan] * len(series))
+
     cleaned = series.astype(str).str.replace(r"[^\d.,\-]", "", regex=True)
-    # Check if European format (e.g. 1.200,50)
-    sample = cleaned.dropna().head(20).astype(str)
-    if any("," in s and "." in s and s.rfind(",") > s.rfind(".") for s in sample):
+    sample_clean = cleaned.dropna().head(20).astype(str)
+    if any("," in s and "." in s and s.rfind(",") > s.rfind(".") for s in sample_clean):
         cleaned = cleaned.str.replace(".", "", regex=False).str.replace(",", ".", regex=False)
     else:
         cleaned = cleaned.str.replace(",", "", regex=False)
@@ -41,30 +55,29 @@ def parse_numeric_series(series: pd.Series) -> pd.Series:
     return pd.to_numeric(cleaned, errors="coerce")
 
 def valid_numeric_columns(df: pd.DataFrame) -> list:
-    """Returns columns that are valid numeric candidates, excluding IDs and codes."""
+    """Returns valid numeric candidates respecting word-boundary ID filters."""
     valid = []
     for col in df.columns:
         if FORBIDDEN_COL_PATTERNS.search(col):
             continue
         parsed = parse_numeric_series(df[col])
-        if parsed.notna().sum() > 0.3 * len(df):  # At least 30% valid numbers
+        if parsed.notna().sum() > 0.2 * len(df):
             valid.append(col)
     return valid
 
 def suggest_columns(df: pd.DataFrame):
-    """Suggests best-fit columns for revenue, cost, category, and date."""
     nums = valid_numeric_columns(df)
     cats = [c for c in df.columns if not pd.api.types.is_numeric_dtype(df[c])]
     
     rev_col = nums[0] if nums else (df.columns[0] if len(df.columns) > 0 else None)
     for c in nums:
-        if re.search(r"(revenue|sales|amount|total|price|gross|income)", c, re.IGNORECASE):
+        if re.search(r"(revenue|sales|amount|total|price|gross|income|paid)", c, re.IGNORECASE):
             rev_col = c
             break
             
     cost_col = "None"
     for c in nums:
-        if c != rev_col and re.search(r"(cost|expense|cogs|spend)", c, re.IGNORECASE):
+        if c != rev_col and re.search(r"(cost|expense|cogs|spend|fee)", c, re.IGNORECASE):
             cost_col = c
             break
             
@@ -83,7 +96,6 @@ def suggest_columns(df: pd.DataFrame):
     return {"revenue": rev_col, "cost": cost_col, "category": cat_col, "date": date_col}
 
 def analyze_dataset(df: pd.DataFrame, revenue_col: str, cost_col: str, category_col: str, date_col: str, prep_notes: list):
-    """Executes the complete statistical audit and anomaly detection."""
     warnings = []
     
     rev_series = parse_numeric_series(df[revenue_col]) if revenue_col in df.columns else pd.Series([0]*len(df))
@@ -99,22 +111,23 @@ def analyze_dataset(df: pd.DataFrame, revenue_col: str, cost_col: str, category_
     net_profit = total_revenue - total_costs if cost_known else None
     profit_margin = (net_profit / total_revenue * 100) if cost_known and total_revenue > 0 else None
     
-    # Category revenue breakdown
     revenue_by_category = {}
     if category_col and category_col != "None" and category_col in df.columns:
         cat_df = pd.DataFrame({"category": df[category_col].astype(str), "revenue": rev_series})
         grouped = cat_df.groupby("category")["revenue"].sum().sort_values(ascending=False)
         revenue_by_category = grouped.to_dict()
 
-    # Anomaly detection (Fixed Phase 2: compute total anomalies before slicing)
+    # IQR-based Anomaly Detection (robust against extreme outliers)
     anomalies = []
-    if len(rev_series.dropna()) > 5:
-        mean_val = rev_series.mean()
-        std_val = rev_series.std()
-        if std_val > 0:
-            threshold = mean_val + (3 * std_val)
-            outlier_df = df[rev_series > threshold].copy()
-            outlier_df["parsed_revenue"] = rev_series[rev_series > threshold]
+    clean_rev = rev_series.dropna()
+    if len(clean_rev) > 5:
+        q1 = clean_rev.quantile(0.25)
+        q3 = clean_rev.quantile(0.75)
+        iqr = q3 - q1
+        if iqr > 0:
+            upper_bound = q3 + (1.5 * iqr)
+            outlier_df = df[rev_series > upper_bound].copy()
+            outlier_df["parsed_revenue"] = rev_series[rev_series > upper_bound]
             for idx, row in outlier_df.iterrows():
                 anomalies.append({
                     "row_index": int(idx),
@@ -124,13 +137,12 @@ def analyze_dataset(df: pd.DataFrame, revenue_col: str, cost_col: str, category_
                 
     anomaly_count = len(anomalies)
 
-    # Trends calculation
     trend_points = []
     granularity = "None"
     change_pct = None
     if date_col and date_col != "None" and date_col in df.columns:
         try:
-            dates = pd.to_datetime(df[date_col], errors="coerce")
+            dates = pd.to_datetime(df[date_col], errors="coerce", dayfirst=True)
             trend_df = pd.DataFrame({"date": dates, "revenue": rev_series}).dropna(subset=["date"])
             if not trend_df.empty:
                 trend_df["period"] = trend_df["date"].dt.to_period("M").astype(str)
@@ -145,13 +157,14 @@ def analyze_dataset(df: pd.DataFrame, revenue_col: str, cost_col: str, category_
         except Exception:
             pass
 
-    data_health_index = 100
+    # True data health score without artificial floor
     missing_cells = int(df.isna().sum().sum())
     duplicate_rows = int(df.duplicated().sum())
-    if missing_cells > 0:
-        data_health_index -= min(15, int((missing_cells / (len(df) * max(1, len(df.columns)))) * 100))
-    if duplicate_rows > 0:
-        data_health_index -= min(15, int((duplicate_rows / len(df)) * 100))
+    total_cells = max(1, len(df) * max(1, len(df.columns)))
+    
+    missing_penalty = int((missing_cells / total_cells) * 50)
+    dup_penalty = int((duplicate_rows / max(1, len(df))) * 50)
+    data_health_index = max(0, 100 - missing_penalty - dup_penalty)
 
     totals = {
         "total_revenue": total_revenue,
@@ -163,7 +176,7 @@ def analyze_dataset(df: pd.DataFrame, revenue_col: str, cost_col: str, category_
     
     metadata = {
         "total_rows": len(df),
-        "data_health_index": max(0, data_health_index),
+        "data_health_index": data_health_index,
         "missing_cells": missing_cells,
         "duplicate_rows": duplicate_rows,
         "anomaly_count": anomaly_count
@@ -185,12 +198,11 @@ def analyze_dataset(df: pd.DataFrame, revenue_col: str, cost_col: str, category_
     }
 
 def build_ai_payload(facts: dict) -> dict:
-    """Prepares concise, privacy-safe aggregated facts for AI prompt execution."""
-    rbc = facts.get("revenue_by_category", {})
-    top_categories = dict(list(rbc.items())[:10]) # Truncate to top 10 categories to avoid payload bloat
+    """Prepares fully aligned aggregated facts for AI prompt execution."""
     return {
         "totals": facts.get("totals", {}),
         "metadata": facts.get("metadata", {}),
-        "top_categories": top_categories,
+        "revenue_by_category": facts.get("revenue_by_category", {}),
+        "trend": facts.get("trend", {}),
         "anomaly_count": len(facts.get("anomalies", []))
     }
