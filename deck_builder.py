@@ -1,14 +1,11 @@
 """
 deck_builder.py - FINCH Executive Presentation Generator
-Generates an 8-slide PowerPoint deck with FINCH visual aesthetics, 
-embedded visual charts (Plotly & PPTX shapes), executive KPI cards, and diagrams.
+Generates an 8-slide PowerPoint deck using native python-pptx structured diagrams, 
+KPI cards, and financial breakdown tables without external image rendering dependencies.
 """
 
 import io
-import os
-import tempfile
 import pandas as pd
-import plotly.express as px
 
 from pptx import Presentation
 from pptx.util import Inches, Pt
@@ -17,7 +14,7 @@ from pptx.enum.text import PP_ALIGN
 from pptx.enum.shapes import MSO_SHAPE
 
 # --- FINCH COLOR PALETTE ---
-COLOR_BG = RGBColor(11, 15, 25)          # Dark Aesthetic #0B0f19
+COLOR_BG = RGBColor(11, 15, 25)          # Dark Aesthetic #0B0F19
 COLOR_CARD = RGBColor(22, 32, 50)        # Dark Glass Container #162032
 COLOR_TEAL = RGBColor(15, 157, 143)      # Teal Accent #0F9D8F
 COLOR_EMERALD = RGBColor(16, 185, 129)   # Emerald Green #10B981
@@ -35,19 +32,17 @@ def set_slide_background(slide):
 
 
 def add_header(slide, title_text, category_text="FINCH EXECUTIVE REPORT"):
-    """Adds a styled header with custom category eyebrow and shimmering gradient style text."""
+    """Adds a styled header with custom category eyebrow and title."""
     tb = slide.shapes.add_textbox(Inches(0.8), Inches(0.5), Inches(11.5), Inches(1.0))
     tf = tb.text_frame
     tf.word_wrap = True
     
-    # Eyebrow Category
     p_cat = tf.paragraphs[0]
     p_cat.text = category_text.upper()
     p_cat.font.size = Pt(10)
     p_cat.font.bold = True
     p_cat.font.color.rgb = COLOR_GOLD
     
-    # Main Header Title
     p_title = tf.add_paragraph()
     p_title.text = title_text
     p_title.font.size = Pt(26)
@@ -86,60 +81,8 @@ def add_kpi_card(slide, left, top, width, height, title, value, subtitle=""):
         p_sub.font.color.rgb = COLOR_TEXT_MUTED
 
 
-def generate_chart_image(facts, chart_type="financial_overview", currency="₦"):
-    """Renders Plotly charts with dark themes and exports them as temp PNG images for PowerPoint embedding."""
-    totals = facts["totals"]
-
-    if chart_type == "financial_overview":
-        cost_known = totals.get("cost_known", False)
-        if cost_known:
-            fig = px.bar(
-                x=["Revenue", "Costs", "Net Profit"],
-                y=[totals.get("total_revenue", 0), totals.get("total_costs", 0), totals.get("net_profit", 0)],
-                title="Financial Performance Overview",
-                labels={"x": "Metric", "y": f"Amount ({currency})"},
-                color=["Revenue", "Costs", "Net Profit"],
-                color_discrete_map={"Revenue": "#10b981", "Costs": "#64748b", "Net Profit": "#0f9d8f"},
-                template="plotly_dark"
-            )
-        else:
-            fig = px.bar(
-                x=["Revenue"],
-                y=[totals.get("total_revenue", 0)],
-                title="Total Revenue",
-                labels={"x": "Metric", "y": f"Amount ({currency})"},
-                color_discrete_sequence=["#10b981"],
-                template="plotly_dark"
-            )
-
-    elif chart_type == "category_distribution":
-        rbc = facts.get("revenue_by_category", {})
-        if rbc:
-            bar_df = pd.DataFrame(list(rbc.items())[:8], columns=["Category", "Revenue"]).sort_values("Revenue", ascending=True)
-            fig = px.bar(
-                bar_df, x="Revenue", y="Category", orientation="h",
-                title="Top Revenue Categories",
-                template="plotly_dark", color_discrete_sequence=["#10b981"]
-            )
-        else:
-            return None
-    else:
-        return None
-
-    fig.update_layout(
-        paper_bgcolor="rgba(11,15,25,1)",
-        plot_bgcolor="rgba(22,32,50,0.8)",
-        font=dict(color="#f8fafc", family="Arial"),
-        margin=dict(l=40, r=40, t=50, b=40)
-    )
-
-    tmp = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
-    fig.write_image(tmp.name, width=800, height=450, scale=2)
-    return tmp.name
-
-
 def create_executive_deck(facts, currency="₦", filename="Dataset", scenarios=None):
-    """Generates a styled 8-slide executive presentation byte stream."""
+    """Generates a styled 8-slide executive presentation byte stream using native PPTX elements."""
     prs = Presentation()
     prs.slide_width = Inches(13.333)
     prs.slide_height = Inches(7.5)
@@ -152,7 +95,6 @@ def create_executive_deck(facts, currency="₦", filename="Dataset", scenarios=N
     slide1 = prs.slides.add_slide(blank_layout)
     set_slide_background(slide1)
     
-    # Title Box
     tb = slide1.shapes.add_textbox(Inches(1.0), Inches(2.2), Inches(11.333), Inches(3.0))
     tf = tb.text_frame
     tf.word_wrap = True
@@ -170,7 +112,7 @@ def create_executive_deck(facts, currency="₦", filename="Dataset", scenarios=N
     p1.font.color.rgb = COLOR_TEXT_MAIN
     
     p2 = tf.add_paragraph()
-    p2.text = "Automated financial health audit, growth scenarios, and recommendations."
+    p2.text = "Automated financial health audit, growth scenarios, and executive recommendations."
     p2.font.size = Pt(16)
     p2.font.color.rgb = COLOR_TEXT_MUTED
 
@@ -189,7 +131,6 @@ def create_executive_deck(facts, currency="₦", filename="Dataset", scenarios=N
     add_kpi_card(slide2, Inches(6.8), Inches(1.8), Inches(2.7), Inches(1.5), "Net Profit", profit_str)
     add_kpi_card(slide2, Inches(9.8), Inches(1.8), Inches(2.7), Inches(1.5), "Profit Margin", margin_str)
 
-    # Key Verdict Card
     verdict_card = slide2.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, Inches(0.8), Inches(3.7), Inches(11.7), Inches(2.8))
     verdict_card.fill.solid()
     verdict_card.fill.fore_color.rgb = COLOR_CARD
@@ -218,48 +159,66 @@ def create_executive_deck(facts, currency="₦", filename="Dataset", scenarios=N
     vp1.font.size = Pt(14)
     vp1.font.color.rgb = COLOR_TEXT_MAIN
 
-    # ------------------------------------------------------------- SLIDE 3: Visual Financial Chart Embed
+    # ------------------------------------------------------------- SLIDE 3: Financial Performance Breakdown
     slide3 = prs.slides.add_slide(blank_layout)
     set_slide_background(slide3)
-    add_header(slide3, "Financial Overview & Cost Structure")
+    add_header(slide3, "Financial Overview & Core Metrics")
 
-    chart1_path = generate_chart_image(facts, "financial_overview", currency)
-    if chart1_path and os.path.exists(chart1_path):
-        slide3.shapes.add_picture(chart1_path, Inches(0.8), Inches(1.8), Inches(6.5), Inches(4.5))
-        os.remove(chart1_path)
+    card_fin = slide3.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, Inches(0.8), Inches(1.8), Inches(11.7), Inches(4.8))
+    card_fin.fill.solid()
+    card_fin.fill.fore_color.rgb = COLOR_CARD
+    card_fin.line.color.rgb = COLOR_TEAL
 
-    # Narrative callout beside chart
-    tb_chart = slide3.shapes.add_textbox(Inches(7.6), Inches(1.8), Inches(4.9), Inches(4.5))
-    tf_chart = tb_chart.text_frame
-    tf_chart.word_wrap = True
+    ftf = card_fin.text_frame
+    ftf.margin_left = Inches(0.4)
+    ftf.margin_top = Inches(0.4)
     
-    cp0 = tf_chart.paragraphs[0]
-    cp0.text = "Key Takeaways:"
-    cp0.font.size = Pt(16)
-    cp0.font.bold = True
-    cp0.font.color.rgb = COLOR_GOLD
+    fp0 = ftf.paragraphs[0]
+    fp0.text = "FINANCIAL PERFORMANCE METRICS"
+    fp0.font.size = Pt(14)
+    fp0.font.bold = True
+    fp0.font.color.rgb = COLOR_GOLD
 
-    cp1 = tf_chart.add_paragraph()
-    cp1.text = "• Visual chart illustrates total top-line revenue vs bottom-line net operational profitability."
-    cp1.font.size = Pt(14)
-    cp1.font.color.rgb = COLOR_TEXT_MAIN
+    fp1 = ftf.add_paragraph()
+    fp1.text = f"• Gross Top-Line Revenue: {rev_str}\n" \
+               f"• Total Recorded Costs: {cost_str}\n" \
+               f"• Bottom-Line Net Profit: {profit_str}\n" \
+               f"• Operating Margin Efficiency: {margin_str}"
+    fp1.font.size = Pt(16)
+    fp1.font.color.rgb = COLOR_TEXT_MAIN
 
-    # ------------------------------------------------------------- SLIDE 4: Category Breakdown Chart
+    # ------------------------------------------------------------- SLIDE 4: Category Distribution Breakdown
     slide4 = prs.slides.add_slide(blank_layout)
     set_slide_background(slide4)
     add_header(slide4, "Top Revenue Categories & Concentration")
 
-    chart2_path = generate_chart_image(facts, "category_distribution", currency)
-    if chart2_path and os.path.exists(chart2_path):
-        slide4.shapes.add_picture(chart2_path, Inches(0.8), Inches(1.8), Inches(6.5), Inches(4.5))
-        os.remove(chart2_path)
-    else:
-        tb_nocat = slide4.shapes.add_textbox(Inches(0.8), Inches(2.0), Inches(6.5), Inches(3.0))
-        tb_nocat.text_frame.text = "No category mapping selected for breakdown chart."
+    card_cat = slide4.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, Inches(0.8), Inches(1.8), Inches(11.7), Inches(4.8))
+    card_cat.fill.solid()
+    card_cat.fill.fore_color.rgb = COLOR_CARD
+    card_cat.line.color.rgb = COLOR_TEAL
 
-    # Concentration Analysis Card
-    add_kpi_card(slide4, Inches(7.6), Inches(1.8), Inches(4.9), Inches(4.5), 
-                 "Revenue Concentration", "Category Audit", "Evaluate dependencies on top-performing product/service categories.")
+    ctf = card_cat.text_frame
+    ctf.margin_left = Inches(0.4)
+    ctf.margin_top = Inches(0.4)
+    
+    cp0 = ctf.paragraphs[0]
+    cp0.text = "CATEGORY REVENUE LEADERBOARD"
+    cp0.font.size = Pt(14)
+    cp0.font.bold = True
+    cp0.font.color.rgb = COLOR_GOLD
+
+    rbc = facts.get("revenue_by_category", {})
+    cat_text = ""
+    if rbc:
+        for cat, val in list(rbc.items())[:6]:
+            cat_text += f"• {cat}: {currency}{val:,.2f}\n"
+    else:
+        cat_text = "No category mapping selected for breakdown."
+
+    cp1 = ctf.add_paragraph()
+    cp1.text = cat_text
+    cp1.font.size = Pt(14)
+    cp1.font.color.rgb = COLOR_TEXT_MAIN
 
     # ------------------------------------------------------------- SLIDE 5: Data Reliability & Quality Audit
     slide5 = prs.slides.add_slide(blank_layout)
@@ -287,16 +246,13 @@ def create_executive_deck(facts, currency="₦", filename="Dataset", scenarios=N
     ap0.font.color.rgb = COLOR_GOLD
 
     anomalies = facts.get("anomalies", [])
+    ap1 = atf.add_paragraph()
     if anomalies:
-        ap1 = atf.add_paragraph()
         ap1.text = f"Detected {len(anomalies)} statistical anomalies in transaction values. Verify large transactions for potential data entry errors or concentrated revenue spikes."
-        ap1.font.size = Pt(14)
-        ap1.font.color.rgb = COLOR_TEXT_MAIN
     else:
-        ap1 = atf.add_paragraph()
         ap1.text = "No statistical anomalies detected. Data distribution remains within expected bounds."
-        ap1.font.size = Pt(14)
-        ap1.font.color.rgb = COLOR_TEXT_MAIN
+    ap1.font.size = Pt(14)
+    ap1.font.color.rgb = COLOR_TEXT_MAIN
 
     # ------------------------------------------------------------- SLIDE 6: What-If Scenarios Diagram
     slide6 = prs.slides.add_slide(blank_layout)
