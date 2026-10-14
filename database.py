@@ -32,7 +32,7 @@ def init_db():
         """)
         conn.execute("""
             CREATE TABLE IF NOT EXISTS scenarios (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id INTEGER PRIMARY KEY,
                 username VARCHAR,
                 scenario_name VARCHAR,
                 data_key VARCHAR,
@@ -41,7 +41,7 @@ def init_db():
         """)
         conn.execute("""
             CREATE TABLE IF NOT EXISTS audit_history (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id INTEGER PRIMARY KEY,
                 email VARCHAR,
                 company VARCHAR,
                 file_name VARCHAR,
@@ -54,7 +54,7 @@ def init_db():
         """)
         conn.execute("""
             CREATE TABLE IF NOT EXISTS feedback (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id INTEGER PRIMARY KEY,
                 username VARCHAR,
                 feedback_text TEXT,
                 timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -115,9 +115,12 @@ def get_user_email(username: str) -> str:
 def save_scenario_db(username: str, name: str, data_key: str, payload: dict):
     import json
     with get_connection() as conn:
+        # Get next ID for DuckDB table insertion
+        max_id = conn.execute("SELECT COALESCE(MAX(id), 0) FROM scenarios").fetchone()[0]
+        next_id = max_id + 1
         conn.execute(
-            "INSERT INTO scenarios (username, scenario_name, data_key, payload) VALUES (?, ?, ?, ?)",
-            (username, name, data_key, json.dumps(payload))
+            "INSERT INTO scenarios (id, username, scenario_name, data_key, payload) VALUES (?, ?, ?, ?, ?)",
+            (next_id, username, name, data_key, json.dumps(payload))
         )
 
 def load_scenarios_db(username: str, data_key: str) -> list:
@@ -140,9 +143,10 @@ def delete_scenarios_db(username: str, data_key: str):
 
 def save_feedback_db(username: str, feedback_text: str):
     with get_connection() as conn:
+        max_id = conn.execute("SELECT COALESCE(MAX(id), 0) FROM feedback").fetchone()[0]
         conn.execute(
-            "INSERT INTO feedback (username, feedback_text) VALUES (?, ?)",
-            (username, feedback_text)
+            "INSERT INTO feedback (id, username, feedback_text) VALUES (?, ?, ?)",
+            (max_id + 1, username, feedback_text)
         )
 
 def log_tenant_activity(email: str, activity: str, increment_upload: bool = False):
@@ -154,10 +158,11 @@ def log_tenant_activity(email: str, activity: str, increment_upload: bool = Fals
 
 def save_audit_history_db(email: str, company: str, file_name: str, totals: dict, summary: str):
     with get_connection() as conn:
+        max_id = conn.execute("SELECT COALESCE(MAX(id), 0) FROM audit_history").fetchone()[0]
         conn.execute(
-            """INSERT INTO audit_history (email, company, file_name, total_revenue, net_profit, profit_margin, summary)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            (email, company, file_name, totals.get("total_revenue", 0), totals.get("net_profit", 0), totals.get("profit_margin", 0), summary)
+            """INSERT INTO audit_history (id, email, company, file_name, total_revenue, net_profit, profit_margin, summary)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (max_id + 1, email, company, file_name, totals.get("total_revenue", 0), totals.get("net_profit", 0), totals.get("profit_margin", 0), summary)
         )
 
 def load_user_history_db(email: str) -> list:
