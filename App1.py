@@ -1,6 +1,6 @@
 """
 FINCH - AI Business Intelligence Frontend (App1.py)
-Integrated with cinematic splash and banner bird intro matching #0b0f19.
+Integrated with cinematic splash, banner bird intro, and custom Space Grotesk shimmering header.
 """
 
 import hashlib
@@ -50,10 +50,6 @@ st.markdown("""
     }
     div[data-testid="stMetric"] label { color: #94a3b8 !important; font-weight: 500; font-size: 0.85rem !important; text-transform: uppercase; }
     div[data-testid="stMetric"] [data-testid="stMetricValue"] { color: #f8fafc !important; font-weight: 700; }
-    .beta-badge { 
-        background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: #ffffff; 
-        font-size: 0.75rem; font-weight: 700; padding: 4px 10px; border-radius: 20px; margin-left: 8px; text-transform: uppercase; 
-    }
     h1, h2, h3 { color: #f8fafc; letter-spacing: -0.03em; font-weight: 700; }
     .stButton>button { 
         background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: white; border: none; border-radius: 12px; 
@@ -140,12 +136,64 @@ if not st.session_state.get("user"):
     if st.session_state["nav_state"] == "portal":
         _, col, _ = st.columns([1, 2.2, 1])
         with col:
-            # --- ANIMATED BIRD LANDING ABOVE PORTAL HEADER ---
-            show_finch_intro(mode="banner", height=220, bg="#0b0f19")
+            # --- ANIMATED BIRD LANDING ---
+            show_finch_intro(mode="banner", height=200, bg="#0b0f19")
             
-            st.markdown(f"<h1 style='text-align:center; margin-top:-10px;'>FINCH <span class='beta-badge'>v2.11</span></h1>", unsafe_allow_html=True)
-            st.markdown("<p style='text-align:center;color:#94a3b8;font-size:0.95rem;margin-bottom:20px;'>"
-                        "Secure Business Intelligence Workspace</p>", unsafe_allow_html=True)
+            # --- CUSTOM SHIMMERING TYPOGRAPHY HEADER ---
+            st.markdown("""
+            <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@700&family=Inter:wght@400;500&display=swap" rel="stylesheet">
+            <style>
+            .finch-wrap{text-align:center;padding:0.2rem 0 1.5rem;}
+            .finch-title{
+              display:inline-block;
+              font-family:'Space Grotesk',sans-serif;
+              font-weight:700;
+              font-size:4rem;
+              line-height:1;
+              letter-spacing:.32em;
+              margin-right:-.32em;
+              background:linear-gradient(110deg,#0f9d8f 0%,#5eead4 28%,#f4b860 50%,#5eead4 72%,#0f9d8f 100%);
+              background-size:250% auto;
+              -webkit-background-clip:text;
+              background-clip:text;
+              -webkit-text-fill-color:transparent;
+              animation:finch-shine 7s linear infinite;
+              filter:drop-shadow(0 0 20px rgba(20,184,166,.40));
+            }
+            @keyframes finch-shine{to{background-position:250% center;}}
+            .finch-badge{
+              display:inline-block;
+              vertical-align:top;
+              margin-left:1.2rem;
+              padding:.2rem .6rem;
+              font-family:'Inter',sans-serif;
+              font-size:.75rem;
+              font-weight:700;
+              color:#fff;
+              background:linear-gradient(135deg,#10b981,#0f9d8f);
+              border-radius:999px;
+              box-shadow:0 0 14px rgba(16,185,129,.5);
+            }
+            .finch-line{
+              width:70px;height:3px;margin:.9rem auto .7rem;
+              background:linear-gradient(90deg,transparent,#f4b860,transparent);
+              border-radius:2px;
+            }
+            .finch-sub{
+              font-family:'Inter',sans-serif;
+              font-size:.8rem;
+              font-weight:500;
+              letter-spacing:.3em;
+              text-transform:uppercase;
+              color:#7fa6c9;
+            }
+            </style>
+            <div class="finch-wrap">
+            <span class="finch-title">FINCH</span><span class="finch-badge">V2.11</span>
+            <div class="finch-line"></div>
+            <div class="finch-sub">Secure Business Intelligence Workspace</div>
+            </div>
+            """, unsafe_allow_html=True)
             
             tab_login, tab_signup = st.tabs(["Log in", "Create account"])
 
