@@ -1,8 +1,10 @@
 """
 FINCH - AI Business Intelligence Frontend (App1.py)
-Instant splash screen overlay injection to eliminate initial login page flash.
+Integrated with static logo branding, floating top-right watermark badge, 
+shimmering gradient title accents, and deep dark glassmorphic styling.
 """
 
+import base64
 import hashlib
 import hmac
 import io
@@ -30,33 +32,136 @@ APP_VERSION = "2.11"
 st.set_page_config(page_title="FINCH | AI Business Intelligence", page_icon="🐦",
                    layout="wide", initial_sidebar_state="expanded")
 
-# --- INSTANT CINEMATIC SPLASH OVERLAY (RENDERED FIRST BEFORE ANYTHING ELSE) ---
+# --- INSTANT CINEMATIC SPLASH OVERLAY ---
 show_finch_intro(mode="splash", bg="#0b0f19")
 
-# --- SIGNATURE DARK GLASSMORPHISM STYLING ---
-st.markdown("""
+
+def get_base64_svg(svg_path: str = "finch_bird.svg") -> str:
+    """Safely reads the vector logo file and returns a base64 encoded string."""
+    for path in [svg_path, "finch_bird.svg", "finch_logo.jpeg"]:
+        if os.path.exists(path):
+            with open(path, "rb") as f:
+                return base64.b64encode(f.read()).decode("utf-8")
+    return ""
+
+
+B64_LOGO = get_base64_svg()
+
+# --- SIGNATURE DARK GLASSMORPHISM & SHIMMERING TYPOGRAPHY STYLING ---
+st.markdown(f"""
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
-    .stApp { background-color: #0b0f19; color: #f1f5f9; font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; }
-    section[data-testid="stSidebar"] { background-color: #050811; border-right: 1px solid rgba(30, 41, 59, 0.6); }
-    .saas-card { 
+    /* App Base Background & Font */
+    .stApp {{ 
+        background-color: #0b0f19; 
+        color: #f1f5f9; 
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; 
+    }}
+    
+    section[data-testid="stSidebar"] {{ 
+        background-color: #050811; 
+        border-right: 1px solid rgba(30, 41, 59, 0.6); 
+    }}
+
+    /* Permanent Fixed Top-Right Branding Badge */
+    .floating-finch-badge {{
+        position: fixed;
+        top: 18px;
+        right: 24px;
+        z-index: 99999;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        background: rgba(15, 23, 42, 0.75);
+        border: 1px solid rgba(30, 41, 59, 0.8);
+        backdrop-filter: blur(12px);
+        padding: 6px 14px;
+        border-radius: 999px;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5), inset 0 1px 1px rgba(255,255,255,0.1);
+        pointer-events: none;
+    }}
+    .floating-finch-badge img {{
+        width: 22px;
+        height: auto;
+    }}
+    .floating-finch-badge span {{
+        font-family: 'Space Grotesk', sans-serif;
+        font-weight: 700;
+        font-size: 0.85rem;
+        letter-spacing: 0.15em;
+        background: linear-gradient(110deg,#0f9d8f 0%,#5eead4 50%,#f4b860 100%);
+        -webkit-background-clip: text;
+        background-clip: text;
+        -webkit-text-fill-color: transparent;
+    }}
+
+    /* Subtle Shimmering Gradient Typography for Strategic Headings */
+    .finch-gradient-heading {{
+        font-family: 'Space Grotesk', sans-serif;
+        font-weight: 700;
+        letter-spacing: -0.01em;
+        background: linear-gradient(110deg, #0f9d8f 0%, #5eead4 30%, #f4b860 60%, #5eead4 80%, #0f9d8f 100%);
+        background-size: 200% auto;
+        -webkit-background-clip: text;
+        background-clip: text;
+        -webkit-text-fill-color: transparent;
+        animation: finch-shine 8s linear infinite;
+        display: inline-block;
+    }}
+    @keyframes finch-shine {{ to {{ background-position: 200% center; }} }}
+
+    /* Claymorphism & Glassmorphism Cards */
+    .saas-card {{ 
         background: linear-gradient(135deg, rgba(30, 41, 59, 0.65) 0%, rgba(15, 23, 42, 0.85) 100%); 
-        border: 1px solid rgba(51, 65, 85, 0.5); backdrop-filter: blur(16px);
-        padding: 28px; border-radius: 18px; box-shadow: 0 12px 32px -4px rgba(0, 0, 0, 0.6); margin-bottom: 24px; 
-    }
-    div[data-testid="stMetric"] {
+        border: 1px solid rgba(51, 65, 85, 0.5); 
+        backdrop-filter: blur(16px);
+        padding: 28px; 
+        border-radius: 18px; 
+        box-shadow: 0 12px 32px -4px rgba(0, 0, 0, 0.6); 
+        margin-bottom: 24px; 
+    }}
+    
+    /* Claymorphism Metric Containers */
+    div[data-testid="stMetric"] {{
         background: linear-gradient(145deg, #162032, #101726);
-        border: 1px solid rgba(71, 85, 105, 0.4); padding: 20px; border-radius: 16px;
+        border: 1px solid rgba(71, 85, 105, 0.4); 
+        padding: 20px; 
+        border-radius: 16px;
         box-shadow: inset 0 2px 4px rgba(255, 255, 255, 0.05), 0 12px 28px rgba(0, 0, 0, 0.5);
-    }
-    div[data-testid="stMetric"] label { color: #94a3b8 !important; font-weight: 500; font-size: 0.85rem !important; text-transform: uppercase; }
-    div[data-testid="stMetric"] [data-testid="stMetricValue"] { color: #f8fafc !important; font-weight: 700; }
-    h1, h2, h3 { color: #f8fafc; letter-spacing: -0.03em; font-weight: 700; }
-    .stButton>button { 
-        background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: white; border: none; border-radius: 12px; 
-        font-weight: 600; padding: 0.6rem 1.2rem; width: 100%; box-shadow: inset 0 2px 4px rgba(255, 255, 255, 0.2), 0 6px 16px rgba(16, 185, 129, 0.4);
-    }
-    .stButton>button:hover { background: linear-gradient(135deg, #059669 0%, #047857 100%); transform: translateY(-1px); }
+    }}
+    div[data-testid="stMetric"] label {{ 
+        color: #94a3b8 !important; 
+        font-weight: 500; 
+        font-size: 0.85rem !important; 
+        text-transform: uppercase; 
+    }}
+    div[data-testid="stMetric"] [data-testid="stMetricValue"] {{ 
+        color: #f8fafc !important; 
+        font-weight: 700; 
+    }}
+
+    /* Glassmorphic Buttons */
+    .stButton>button {{ 
+        background: linear-gradient(135deg, #10b981 0%, #059669 100%); 
+        color: white; 
+        border: none; 
+        border-radius: 12px; 
+        font-weight: 600; 
+        padding: 0.6rem 1.2rem; 
+        width: 100%; 
+        box-shadow: inset 0 2px 4px rgba(255, 255, 255, 0.2), 0 6px 16px rgba(16, 185, 129, 0.4);
+    }}
+    .stButton>button:hover {{ 
+        background: linear-gradient(135deg, #059669 0%, #047857 100%); 
+        transform: translateY(-1px); 
+    }}
 </style>
+
+<!-- Floating Top-Right Watermark Logo -->
+<div class="floating-finch-badge">
+    {"<img src='data:image/svg+xml;base64," + B64_LOGO + "' alt='FINCH'/>" if B64_LOGO else "🐦"}
+    <span>FINCH</span>
+</div>
 """, unsafe_allow_html=True)
 
 
@@ -139,16 +244,14 @@ if not st.session_state.get("user"):
             # --- ANIMATED BIRD LANDING ---
             show_finch_intro(mode="banner", height=200, bg="#0b0f19")
             
-            # --- CUSTOM SHIMMERING TYPOGRAPHY HEADER ---
+            # --- SHIMMERING TYPOGRAPHY HEADER ---
             st.markdown("""
-            <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@700&family=Inter:wght@400;500&display=swap" rel="stylesheet">
-            <style>
-            .finch-wrap{text-align:center;padding:0.2rem 0 1.5rem;}
-            .finch-title{
+            <div class="finch-wrap" style="text-align:center; padding:0.2rem 0 1.5rem;">
+            <span class="finch-title" style="
               display:inline-block;
               font-family:'Space Grotesk',sans-serif;
               font-weight:700;
-              font-size:4rem;
+              font-size:3.8rem;
               line-height:1;
               letter-spacing:.32em;
               margin-right:-.32em;
@@ -158,10 +261,8 @@ if not st.session_state.get("user"):
               background-clip:text;
               -webkit-text-fill-color:transparent;
               animation:finch-shine 7s linear infinite;
-              filter:drop-shadow(0 0 20px rgba(20,184,166,.40));
-            }
-            @keyframes finch-shine{to{background-position:250% center;}}
-            .finch-badge{
+              filter:drop-shadow(0 0 20px rgba(20,184,166,.40));">FINCH</span>
+            <span class="finch-badge" style="
               display:inline-block;
               vertical-align:top;
               margin-left:1.2rem;
@@ -172,26 +273,18 @@ if not st.session_state.get("user"):
               color:#fff;
               background:linear-gradient(135deg,#10b981,#0f9d8f);
               border-radius:999px;
-              box-shadow:0 0 14px rgba(16,185,129,.5);
-            }
-            .finch-line{
+              box-shadow:0 0 14px rgba(16,185,129,.5);">V2.11</span>
+            <div class="finch-line" style="
               width:70px;height:3px;margin:.9rem auto .7rem;
               background:linear-gradient(90deg,transparent,#f4b860,transparent);
-              border-radius:2px;
-            }
-            .finch-sub{
+              border-radius:2px;"></div>
+            <div class="finch-sub" style="
               font-family:'Inter',sans-serif;
               font-size:.8rem;
               font-weight:500;
               letter-spacing:.3em;
               text-transform:uppercase;
-              color:#7fa6c9;
-            }
-            </style>
-            <div class="finch-wrap">
-            <span class="finch-title">FINCH</span><span class="finch-badge">V2.11</span>
-            <div class="finch-line"></div>
-            <div class="finch-sub">Secure Business Intelligence Workspace</div>
+              color:#7fa6c9;">Secure Business Intelligence Workspace</div>
             </div>
             """, unsafe_allow_html=True)
             
@@ -242,12 +335,21 @@ USER_EMAIL = get_user_email(USER)
 if not check_backend_status(BACKEND_URL, BACKEND_SECRET_KEY):
     st.warning("⚠️ Backend API is waking up or offline. AI advisory may not work yet.")
 
+# --- SIDEBAR BRANDING HEADER ---
+sidebar_logo_html = f"""
+<div style="display:flex; align-items:center; gap:12px; margin-bottom:16px;">
+    {"<img src='data:image/svg+xml;base64," + B64_LOGO + "' style='width:32px; height:auto;'/>" if B64_LOGO else "🐦"}
+    <h3 style="margin:0; font-family:'Space Grotesk',sans-serif; font-size:1.25rem;" class="finch-gradient-heading">FINCH Workspace</h3>
+</div>
+"""
+st.sidebar.markdown(sidebar_logo_html, unsafe_allow_html=True)
+
 uploaded = st.file_uploader("📁 Upload your sales or business records (.csv or .xlsx, max 10MB)", type=["csv", "xlsx"])
 
 if uploaded is None:
     st.info("👋 Please upload your sales or business records above to begin audit.")
     st.markdown("---")
-    st.subheader("📂 Your Past Saved Audits & History")
+    st.markdown("<h3 class='finch-gradient-heading'>📂 Your Past Saved Audits & History</h3>", unsafe_allow_html=True)
     history_records = load_user_history_db(USER_EMAIL)
     if history_records:
         st.dataframe(pd.DataFrame(history_records)[["file_name", "total_revenue", "net_profit", "profit_margin", "timestamp"]], use_container_width=True)
@@ -291,7 +393,6 @@ df = st.session_state["active_df"]
 notes = st.session_state["prep_notes"]
 sug = st.session_state["suggested"]
 
-st.sidebar.markdown("### 🐦 FINCH Workspace")
 currency = st.sidebar.selectbox("Currency", ["₦", "$", "€", "£"])
 
 nums = valid_numeric_columns(df)
@@ -341,7 +442,7 @@ if is_admin:
 tabs = st.tabs(["📊 Summary", "📈 Trends", "🔍 Data Check", "🎛️ What-If", "📁 Reports & History"])
 
 with tabs[0]:
-    st.subheader("FINCH Executive Summary")
+    st.markdown("<h2 class='finch-gradient-heading' style='font-size:2rem; margin-bottom:12px;'>FINCH Executive Summary</h2>", unsafe_allow_html=True)
     
     profit_val = totals["net_profit"] if cost_known and totals["net_profit"] is not None else 0.0
     margin_val = totals["profit_margin"]
@@ -397,7 +498,7 @@ with tabs[0]:
             st.info("Select a category column to see category distribution.")
 
 with tabs[1]:
-    st.subheader("Performance Trends & Leaderboards")
+    st.markdown("<h2 class='finch-gradient-heading' style='font-size:2rem; margin-bottom:12px;'>Performance Trends & Leaderboards</h2>", unsafe_allow_html=True)
     if len(trend["points"]) >= 1:
         tdf = pd.DataFrame(trend["points"])
         fig_trend = px.line(tdf, x="period", y="revenue", markers=True, template="plotly_dark",
@@ -417,7 +518,7 @@ with tabs[1]:
         st.dataframe(gdf, use_container_width=True)
 
 with tabs[2]:
-    st.subheader("Data Check: Is Your Data Reliable?")
+    st.markdown("<h2 class='finch-gradient-heading' style='font-size:2rem; margin-bottom:12px;'>Data Check: Is Your Data Reliable?</h2>", unsafe_allow_html=True)
     d1, d2, d3 = st.columns(3)
     d1.metric("Data Quality Score", f"{meta['data_health_index']}%")
     d2.metric("Missing Cells", f"{meta['missing_cells']:,}")
@@ -431,7 +532,7 @@ with tabs[2]:
     st.dataframe(df.head(10), use_container_width=True)
 
 with tabs[3]:
-    st.subheader("What-If Scenario & Heatmap Sensitivity Modelling")
+    st.markdown("<h2 class='finch-gradient-heading' style='font-size:2rem; margin-bottom:12px;'>What-If Scenario & Heatmap Sensitivity Modelling</h2>", unsafe_allow_html=True)
     st.caption("Volume changes scale variable costs; fixed costs stay flat; price changes affect revenue only.")
 
     sim_totals = dict(totals)
@@ -487,7 +588,7 @@ with tabs[3]:
         st.plotly_chart(fig_heat, use_container_width=True)
 
 with tabs[4]:
-    st.subheader("Reports, FINCH AI Advisor & History")
+    st.markdown("<h2 class='finch-gradient-heading' style='font-size:2rem; margin-bottom:12px;'>Reports, FINCH AI Advisor & History</h2>", unsafe_allow_html=True)
     
     col_rep1, col_rep2 = st.columns(2)
     with col_rep1:
@@ -530,7 +631,7 @@ with tabs[4]:
                         facts, currency=currency, filename=uploaded_name, scenarios=load_scenarios_db(USER))
                     st.session_state["deck_bytes"] = deck_bytes
                     st.success("✅ Deck generated.")
-                    save_audit_history_db(USER_EMAIL, "Independent SME", uploaded_name, totals, "Generated PowerPoint Deck (.pptx)")
+                    save_audit_history_db(USER__EMAIL, "Independent SME", uploaded_name, totals, "Generated PowerPoint Deck (.pptx)")
                 except Exception as e:
                     st.error(f"Error generating presentation: {e}")
         if "deck_bytes" in st.session_state:
@@ -540,7 +641,7 @@ with tabs[4]:
                                type="primary")
 
     st.markdown("---")
-    st.subheader("📂 Dedicated User History & Audit Trail")
+    st.markdown("<h3 class='finch-gradient-heading'>📂 Dedicated User History & Audit Trail</h3>", unsafe_allow_html=True)
     history_records = load_user_history_db(USER_EMAIL)
     if history_records:
         st.dataframe(pd.DataFrame(history_records)[["file_name", "total_revenue", "net_profit", "profit_margin", "timestamp"]], use_container_width=True)
