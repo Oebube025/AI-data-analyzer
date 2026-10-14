@@ -1,6 +1,6 @@
 """
 FINCH - AI Business Intelligence Frontend (App1.py)
-Integrated with cinematic splash, banner bird intro, and custom Space Grotesk shimmering header.
+Instant splash screen overlay injection to eliminate initial login page flash.
 """
 
 import hashlib
@@ -30,7 +30,7 @@ APP_VERSION = "2.11"
 st.set_page_config(page_title="FINCH | AI Business Intelligence", page_icon="🐦",
                    layout="wide", initial_sidebar_state="expanded")
 
-# --- CINEMATIC INTRO SPLASH SCREEN (MATCHING #0b0f19) ---
+# --- INSTANT CINEMATIC SPLASH OVERLAY (RENDERED FIRST BEFORE ANYTHING ELSE) ---
 show_finch_intro(mode="splash", bg="#0b0f19")
 
 # --- SIGNATURE DARK GLASSMORPHISM STYLING ---
