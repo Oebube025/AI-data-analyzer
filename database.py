@@ -1,6 +1,6 @@
 """
 database.py - FINCH Persistence Layer
-Fully synchronized with all required helper functions, audit history, and DuckDB tuple parameter bindings.
+Self-healing DuckDB storage backend that auto-initializes tables on every connection.
 """
 
 import os
@@ -12,10 +12,8 @@ from datetime import datetime
 DB_FILE = os.getenv("DB_PATH", "finch_v3.duckdb")
 
 def get_connection():
-    return duckdb.connect(DB_FILE)
-
-def init_db():
-    conn = get_connection()
+    """Opens a connection and guarantees all necessary tables exist."""
+    conn = duckdb.connect(DB_FILE)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS tenants (
             email VARCHAR PRIMARY KEY,
@@ -52,9 +50,6 @@ def init_db():
             timestamp TIMESTAMP
         );
     """)
-    # Alias table support for backwards compatibility
-    conn.execute("CREATE TABLE IF NOT EXISTS audit_history AS SELECT * FROM user_audit_history WHERE 1=0;")
-    
     conn.execute("""
         CREATE TABLE IF NOT EXISTS feedback (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -64,6 +59,10 @@ def init_db():
             timestamp TIMESTAMP
         );
     """)
+    return conn
+
+def init_db():
+    conn = get_connection()
     conn.close()
 
 def create_user(username: str, email: str, password_hash: str) -> bool:
