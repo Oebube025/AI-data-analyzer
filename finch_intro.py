@@ -1,14 +1,6 @@
 """
 finch_intro.py  -  animated Finch bird for Streamlit.
-
-Usage in App1.py (right after st.set_page_config):
-
-    from finch_intro import show_finch_intro
-    show_finch_intro(mode="splash")      # full-screen intro, once per session
-    # or
-    show_finch_intro(mode="banner")      # inline hero banner with a Replay button
-
-No extra dependencies: it only uses streamlit.
+Updated with app background color (#0b0f19) and banner/portal integration.
 """
 import streamlit as st
 import streamlit.components.v1 as components
@@ -31,9 +23,9 @@ _HTML = """<!DOCTYPE html>
   #arrow { transform-box:fill-box; transform-origin:0% 100%; }
   #arrow.pop { animation:pop .7s cubic-bezier(.3,1.6,.5,1); }
   @keyframes pop { 0%{transform:scale(1)} 40%{transform:scale(1.22) rotate(-4deg)} 100%{transform:scale(1)} }
-  button { position:absolute; left:50%; bottom:14px; transform:translateX(-50%);
+  button { position:absolute; left:50%; bottom:10px; transform:translateX(-50%);
            background:transparent; color:#EFA94E; border:1.5px solid #EFA94E; border-radius:999px;
-           padding:8px 20px; font-size:14px; cursor:pointer; opacity:0; transition:opacity .5s;
+           padding:6px 16px; font-size:12px; cursor:pointer; opacity:0; transition:opacity .5s;
            display:__BTN__; }
   button.show { opacity:1; }
 </style></head>
@@ -61,7 +53,7 @@ _HTML = """<!DOCTYPE html>
     <circle cx="788" cy="205" r="7" fill="#0A1A33"/>
   </svg>
 </div>
-<button id="replay">Replay</button>
+<button id="replay">Replay Animation</button>
 <script>
 (function () {
   var bird = document.getElementById('bird'), wing = document.getElementById('wing'),
@@ -72,7 +64,7 @@ _HTML = """<!DOCTYPE html>
 
   function layout() {
     W = window.innerWidth; H = window.innerHeight;
-    size = Math.max(160, Math.min(W * 0.5, H * 0.8, 440));
+    size = Math.max(140, Math.min(W * 0.4, H * 0.7, 340));
     bh = size * 350 / 435;
     bird.style.width = size + 'px'; bird.style.height = bh + 'px';
   }
@@ -121,18 +113,12 @@ _HTML = """<!DOCTYPE html>
 </body></html>"""
 
 
-def show_finch_intro(mode: str = "splash", height: int = 420, bg: str = "#0A1A33") -> None:
-    """Render the animated Finch bird.
-
-    mode="splash": full-screen overlay, plays once per session, then fades away.
-    mode="banner": inline block of `height` px with a Replay button (renders every run).
-    bg: background colour of the stage ("transparent" lets your app theme show through).
-    """
+def show_finch_intro(mode: str = "splash", height: int = 240, bg: str = "#0b0f19") -> None:
+    """Render the animated Finch bird with app matching background (#0b0f19)."""
     if mode == "splash":
         if st.session_state.get("_finch_intro_done"):
             return
         st.session_state["_finch_intro_done"] = True
-        # Turn the component's iframe into a click-through full-screen overlay that fades out.
         st.markdown(
             f"""<style>
             iframe[srcdoc*="{_MARKER}"] {{

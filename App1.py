@@ -1,6 +1,6 @@
 """
 FINCH - AI Business Intelligence Frontend (App1.py)
-Integrated with `finch_intro.py` for the cinematic full-screen splash animation.
+Integrated with cinematic splash and banner bird intro matching #0b0f19.
 """
 
 import hashlib
@@ -25,13 +25,13 @@ from deck_builder import create_executive_deck
 from simulator import calculate_scenario, generate_sensitivity_matrix
 from finch_intro import show_finch_intro
 
-APP_VERSION = "2.10"
+APP_VERSION = "2.11"
 
 st.set_page_config(page_title="FINCH | AI Business Intelligence", page_icon="🐦",
                    layout="wide", initial_sidebar_state="expanded")
 
-# --- CINEMATIC INTRO SPLASH SCREEN (PLAYS ONCE PER SESSION) ---
-show_finch_intro(mode="splash")
+# --- CINEMATIC INTRO SPLASH SCREEN (MATCHING #0b0f19) ---
+show_finch_intro(mode="splash", bg="#0b0f19")
 
 # --- SIGNATURE DARK GLASSMORPHISM STYLING ---
 st.markdown("""
@@ -138,11 +138,14 @@ if not st.session_state.get("user"):
         st.session_state["nav_state"] = "portal"
 
     if st.session_state["nav_state"] == "portal":
-        _, col, _ = st.columns([1, 2, 1])
+        _, col, _ = st.columns([1, 2.2, 1])
         with col:
-            st.markdown(f"<br><br><h1 style='text-align:center;'>FINCH <span class='beta-badge'>PILOT v2.10</span></h1>", unsafe_allow_html=True)
-            st.markdown("<p style='text-align:center;color:#94a3b8;font-size:1rem;margin-bottom:20px;'>"
-                        "Transform business transaction exports into structured financial reports.</p>", unsafe_allow_html=True)
+            # --- ANIMATED BIRD LANDING ABOVE PORTAL HEADER ---
+            show_finch_intro(mode="banner", height=220, bg="#0b0f19")
+            
+            st.markdown(f"<h1 style='text-align:center; margin-top:-10px;'>FINCH <span class='beta-badge'>v2.11</span></h1>", unsafe_allow_html=True)
+            st.markdown("<p style='text-align:center;color:#94a3b8;font-size:0.95rem;margin-bottom:20px;'>"
+                        "Secure Business Intelligence Workspace</p>", unsafe_allow_html=True)
             
             tab_login, tab_signup = st.tabs(["Log in", "Create account"])
 
