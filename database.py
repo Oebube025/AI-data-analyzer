@@ -1,8 +1,6 @@
 """
 database.py - FINCH Database & Security Persistence Layer
-Handles SQLite/PostgreSQL connection pooling, salted PBKDF2 password hashing, and tenant records.
 """
-
 import os
 import hashlib
 import secrets
@@ -13,7 +11,6 @@ DB_PATH = "finch_v3.duckdb"
 
 @contextmanager
 def get_connection():
-    """Context manager for safe DuckDB connection handling."""
     conn = duckdb.connect(DB_PATH)
     try:
         yield conn
@@ -21,7 +18,6 @@ def get_connection():
         conn.close()
 
 def init_db():
-    """Initializes secure database tables with PBKDF2 password support."""
     with get_connection() as conn:
         conn.execute("""
             CREATE TABLE IF NOT EXISTS tenants (
@@ -58,7 +54,6 @@ def init_db():
         """)
 
 def hash_password(password: str, salt: str = None) -> tuple:
-    """Hashes a password using PBKDF2-HMAC-SHA256 with a secure random salt."""
     if not salt:
         salt = secrets.token_hex(16)
     pwd_hash = hashlib.pbkdf2_hmac(
@@ -70,7 +65,6 @@ def hash_password(password: str, salt: str = None) -> tuple:
     return pwd_hash, salt
 
 def create_user(username: str, email: str, password: str) -> bool:
-    """Registers a new user with salted password hashing."""
     init_db()
     uname = username.strip().lower()
     uemail = email.strip().lower()
@@ -86,7 +80,6 @@ def create_user(username: str, email: str, password: str) -> bool:
         return False
 
 def verify_user(username_or_email: str, password: str) -> str:
-    """Verifies credentials against stored PBKDF2 hashes. Returns username if valid."""
     init_db()
     key = username_or_email.strip().lower()
     try:
@@ -112,8 +105,8 @@ def get_user_email(username: str) -> str:
         return row[0] if row else ""
 
 def save_scenario_db(username: str, name: str, data_key: str, payload: dict):
+    import json
     with get_connection() as conn:
-        import json
         conn.execute(
             "INSERT INTO scenarios (username, scenario_name, data_key, payload) VALUES (?, ?, ?, ?)",
             (username, name, data_key, json.dumps(payload))
@@ -125,8 +118,7 @@ def load_scenarios_db(username: str, data_key: str) -> list:
         rows = conn.execute(
             "SELECT scenario_name, payload FROM scenarios WHERE username = ? AND data_key = ?",
             (username, data_key)
-        .fetchall()
-        )
+        ).fetchall()
         res = []
         for r in rows:
             p = json.loads(r[1])

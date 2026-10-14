@@ -1,26 +1,20 @@
 """
 analysis.py - FINCH Data Analysis & Parsing Engine
-Handles robust total-row stripping, word-boundary ID protection, IQR anomaly detection, and payload assembly.
 """
-
 import re
 import pandas as pd
 import numpy as np
 
-# Strict word-boundary ID filter so "Amount Paid" or "Provider Fee" are never excluded
 FORBIDDEN_COL_PATTERNS = re.compile(r"\b(id|code|zip|phone|status|email|year|month|day|index|ref)\b", re.IGNORECASE)
 
 def prepare_dataframe(df: pd.DataFrame):
-    """Cleans dataframe columns, strips summary rows, and parses types safely."""
     notes = []
     df = df.copy()
-    
     df.columns = [str(c).strip() for c in df.columns]
     
     before_rows = len(df)
     df.dropna(how="all", inplace=True)
     
-    # Strip summary / grand total rows
     if len(df) > 0:
         for col in df.columns:
             if not pd.api.types.is_numeric_dtype(df[col]):
@@ -36,11 +30,9 @@ def prepare_dataframe(df: pd.DataFrame):
     return df, notes
 
 def parse_numeric_series(series: pd.Series) -> pd.Series:
-    """Safely parses numeric columns, protecting alphanumeric IDs and handling formats."""
     if pd.api.types.is_numeric_dtype(series):
         return pd.to_numeric(series, errors="coerce")
     
-    # Check if series contains alphanumeric ID strings (e.g. INV-0042)
     sample = series.dropna().astype(str)
     if any(re.search(r"[A-Za-z]", s) for s in sample.head(10)):
         return pd.Series([np.nan] * len(series))
@@ -55,7 +47,6 @@ def parse_numeric_series(series: pd.Series) -> pd.Series:
     return pd.to_numeric(cleaned, errors="coerce")
 
 def valid_numeric_columns(df: pd.DataFrame) -> list:
-    """Returns valid numeric candidates respecting word-boundary ID filters."""
     valid = []
     for col in df.columns:
         if FORBIDDEN_COL_PATTERNS.search(col):
@@ -117,7 +108,6 @@ def analyze_dataset(df: pd.DataFrame, revenue_col: str, cost_col: str, category_
         grouped = cat_df.groupby("category")["revenue"].sum().sort_values(ascending=False)
         revenue_by_category = grouped.to_dict()
 
-    # IQR-based Anomaly Detection (robust against extreme outliers)
     anomalies = []
     clean_rev = rev_series.dropna()
     if len(clean_rev) > 5:
@@ -134,8 +124,6 @@ def analyze_dataset(df: pd.DataFrame, revenue_col: str, cost_col: str, category_
                     "revenue": float(row["parsed_revenue"]),
                     "category": str(row[category_col]) if category_col != "None" and category_col in df.columns else "N/A"
                 })
-                
-    anomaly_count = len(anomalies)
 
     trend_points = []
     granularity = "None"
@@ -157,7 +145,6 @@ def analyze_dataset(df: pd.DataFrame, revenue_col: str, cost_col: str, category_
         except Exception:
             pass
 
-    # True data health score without artificial floor
     missing_cells = int(df.isna().sum().sum())
     duplicate_rows = int(df.duplicated().sum())
     total_cells = max(1, len(df) * max(1, len(df.columns)))
@@ -166,39 +153,16 @@ def analyze_dataset(df: pd.DataFrame, revenue_col: str, cost_col: str, category_
     dup_penalty = int((duplicate_rows / max(1, len(df))) * 50)
     data_health_index = max(0, 100 - missing_penalty - dup_penalty)
 
-    totals = {
-        "total_revenue": total_revenue,
-        "total_costs": total_costs,
-        "cost_known": cost_known,
-        "net_profit": net_profit,
-        "profit_margin": profit_margin
-    }
-    
-    metadata = {
-        "total_rows": len(df),
-        "data_health_index": data_health_index,
-        "missing_cells": missing_cells,
-        "duplicate_rows": duplicate_rows,
-        "anomaly_count": anomaly_count
-    }
-    
-    trend = {
-        "granularity": granularity,
-        "points": trend_points,
-        "change_pct": change_pct
-    }
-
     return {
-        "totals": totals,
-        "metadata": metadata,
-        "trend": trend,
+        "totals": {"total_revenue": total_revenue, "total_costs": total_costs, "cost_known": cost_known, "net_profit": net_profit, "profit_margin": profit_margin},
+        "metadata": {"total_rows": len(df), "data_health_index": data_health_index, "missing_cells": missing_cells, "duplicate_rows": duplicate_rows, "anomaly_count": len(anomalies)},
+        "trend": {"granularity": granularity, "points": trend_points, "change_pct": change_pct},
         "revenue_by_category": revenue_by_category,
         "anomalies": anomalies,
         "warnings": warnings
     }
 
 def build_ai_payload(facts: dict) -> dict:
-    """Prepares fully aligned aggregated facts for AI prompt execution."""
     return {
         "totals": facts.get("totals", {}),
         "metadata": facts.get("metadata", {}),
