@@ -625,20 +625,15 @@ with tabs[4]:
         st.markdown("### 📈 Presentation Deck")
         st.caption("Generate a professional 8-slide FINCH executive PowerPoint presentation.")
         if st.button("Create PowerPoint Report (.pptx)", type="primary"):
-            with st.spinner("📊 Building presentation..."):
+            with st.spinner("📊 Building presentation with embedded charts & diagrams..."):
                 try:
                     deck_bytes = create_executive_deck(
                         facts, currency=currency, filename=uploaded_name, scenarios=load_scenarios_db(USER))
                     st.session_state["deck_bytes"] = deck_bytes
                     st.success("✅ Deck generated.")
-                    save_audit_history_db(USER__EMAIL, "Independent SME", uploaded_name, totals, "Generated PowerPoint Deck (.pptx)")
+                    save_audit_history_db(USER_EMAIL, "Independent SME", uploaded_name, totals, "Generated PowerPoint Deck (.pptx)")
                 except Exception as e:
                     st.error(f"Error generating presentation: {e}")
-        if "deck_bytes" in st.session_state:
-            st.download_button("📥 Download Business Report (.pptx)", data=st.session_state["deck_bytes"],
-                               file_name="FINCH_Business_Report.pptx",
-                               mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
-                               type="primary")
 
     st.markdown("---")
     st.markdown("<h3 class='finch-gradient-heading'>📂 Dedicated User History & Audit Trail</h3>", unsafe_allow_html=True)

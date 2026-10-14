@@ -1,217 +1,394 @@
 """
-FINCH Executive Deck Builder (deck_builder.py)
-Generates a professional 8-slide PowerPoint presentation with bulletproof dict formatting.
+deck_builder.py - FINCH Executive Presentation Generator
+Generates an 8-slide PowerPoint deck with FINCH visual aesthetics, 
+embedded visual charts (Plotly & PPTX shapes), executive KPI cards, and diagrams.
 """
 
 import io
+import os
+import tempfile
+import pandas as pd
+import plotly.express as px
+
 from pptx import Presentation
 from pptx.util import Inches, Pt
 from pptx.dml.color import RGBColor
+from pptx.enum.text import PP_ALIGN
+from pptx.enum.shapes import MSO_SHAPE
+
+# --- FINCH COLOR PALETTE ---
+COLOR_BG = RGBColor(11, 15, 25)          # Dark Aesthetic #0B0f19
+COLOR_CARD = RGBColor(22, 32, 50)        # Dark Glass Container #162032
+COLOR_TEAL = RGBColor(15, 157, 143)      # Teal Accent #0F9D8F
+COLOR_EMERALD = RGBColor(16, 185, 129)   # Emerald Green #10B981
+COLOR_GOLD = RGBColor(244, 184, 96)      # Accent Gold #F4B860
+COLOR_TEXT_MAIN = RGBColor(248, 250, 252)# Bright Text #F8FAFC
+COLOR_TEXT_MUTED = RGBColor(148, 163, 184)# Muted Text #94A3B8
 
 
-def create_executive_deck(facts: dict, currency: str = "₦", filename: str = "Financial_Report.xlsx", scenarios: list = None) -> bytes:
+def set_slide_background(slide):
+    """Sets slide background to FINCH dark blue #0B0F19."""
+    background = slide.background
+    fill = background.fill
+    fill.solid()
+    fill.fore_color.rgb = COLOR_BG
+
+
+def add_header(slide, title_text, category_text="FINCH EXECUTIVE REPORT"):
+    """Adds a styled header with custom category eyebrow and shimmering gradient style text."""
+    tb = slide.shapes.add_textbox(Inches(0.8), Inches(0.5), Inches(11.5), Inches(1.0))
+    tf = tb.text_frame
+    tf.word_wrap = True
+    
+    # Eyebrow Category
+    p_cat = tf.paragraphs[0]
+    p_cat.text = category_text.upper()
+    p_cat.font.size = Pt(10)
+    p_cat.font.bold = True
+    p_cat.font.color.rgb = COLOR_GOLD
+    
+    # Main Header Title
+    p_title = tf.add_paragraph()
+    p_title.text = title_text
+    p_title.font.size = Pt(26)
+    p_title.font.bold = True
+    p_title.font.color.rgb = COLOR_TEXT_MAIN
+
+
+def add_kpi_card(slide, left, top, width, height, title, value, subtitle=""):
+    """Creates a glassmorphic KPI container card with metric text."""
+    card = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, left, top, width, height)
+    card.fill.solid()
+    card.fill.fore_color.rgb = COLOR_CARD
+    card.line.color.rgb = COLOR_TEAL
+    card.line.width = Pt(1.5)
+    
+    tf = card.text_frame
+    tf.word_wrap = True
+    tf.margin_left = Inches(0.2)
+    tf.margin_top = Inches(0.2)
+    
+    p_label = tf.paragraphs[0]
+    p_label.text = title.upper()
+    p_label.font.size = Pt(10)
+    p_label.font.color.rgb = COLOR_TEXT_MUTED
+    
+    p_val = tf.add_paragraph()
+    p_val.text = str(value)
+    p_val.font.size = Pt(22)
+    p_val.font.bold = True
+    p_val.font.color.rgb = COLOR_EMERALD
+    
+    if subtitle:
+        p_sub = tf.add_paragraph()
+        p_sub.text = subtitle
+        p_sub.font.size = Pt(9)
+        p_sub.font.color.rgb = COLOR_TEXT_MUTED
+
+
+def generate_chart_image(facts, chart_type="financial_overview", currency="₦"):
+    """Renders Plotly charts with dark themes and exports them as temp PNG images for PowerPoint embedding."""
+    totals = facts["totals"]
+
+    if chart_type == "financial_overview":
+        cost_known = totals.get("cost_known", False)
+        if cost_known:
+            fig = px.bar(
+                x=["Revenue", "Costs", "Net Profit"],
+                y=[totals.get("total_revenue", 0), totals.get("total_costs", 0), totals.get("net_profit", 0)],
+                title="Financial Performance Overview",
+                labels={"x": "Metric", "y": f"Amount ({currency})"},
+                color=["Revenue", "Costs", "Net Profit"],
+                color_discrete_map={"Revenue": "#10b981", "Costs": "#64748b", "Net Profit": "#0f9d8f"},
+                template="plotly_dark"
+            )
+        else:
+            fig = px.bar(
+                x=["Revenue"],
+                y=[totals.get("total_revenue", 0)],
+                title="Total Revenue",
+                labels={"x": "Metric", "y": f"Amount ({currency})"},
+                color_discrete_sequence=["#10b981"],
+                template="plotly_dark"
+            )
+
+    elif chart_type == "category_distribution":
+        rbc = facts.get("revenue_by_category", {})
+        if rbc:
+            bar_df = pd.DataFrame(list(rbc.items())[:8], columns=["Category", "Revenue"]).sort_values("Revenue", ascending=True)
+            fig = px.bar(
+                bar_df, x="Revenue", y="Category", orientation="h",
+                title="Top Revenue Categories",
+                template="plotly_dark", color_discrete_sequence=["#10b981"]
+            )
+        else:
+            return None
+    else:
+        return None
+
+    fig.update_layout(
+        paper_bgcolor="rgba(11,15,25,1)",
+        plot_bgcolor="rgba(22,32,50,0.8)",
+        font=dict(color="#f8fafc", family="Arial"),
+        margin=dict(l=40, r=40, t=50, b=40)
+    )
+
+    tmp = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
+    fig.write_image(tmp.name, width=800, height=450, scale=2)
+    return tmp.name
+
+
+def create_executive_deck(facts, currency="₦", filename="Dataset", scenarios=None):
+    """Generates a styled 8-slide executive presentation byte stream."""
     prs = Presentation()
     prs.slide_width = Inches(13.333)
     prs.slide_height = Inches(7.5)
+    blank_layout = prs.slide_layouts[6]
     
-    layout = prs.slide_layouts[6]  # Blank slide
-    
-    totals = facts.get("totals", {})
-    meta = facts.get("metadata", {})
-    rev = totals.get("total_revenue", 0.0)
-    costs = totals.get("total_costs")
-    profit = totals.get("net_profit")
-    margin = totals.get("profit_margin")
+    totals = facts["totals"]
     cost_known = totals.get("cost_known", False)
-    concentration = facts.get("concentration", {})
-    rbc = facts.get("revenue_by_category", {})
-    warnings = facts.get("warnings", [])
 
-    def add_header(slide, title_text, subtitle_text):
-        tb = slide.shapes.add_textbox(Inches(0.8), Inches(0.6), Inches(11.7), Inches(1.2))
-        tf = tb.text_frame
-        tf.word_wrap = True
-        p = tf.paragraphs[0]
-        p.text = title_text
-        p.font.size = Pt(28)
-        p.font.bold = True
-        p.font.color.rgb = RGBColor(15, 23, 42)
+    # ------------------------------------------------------------- SLIDE 1: Title Slide
+    slide1 = prs.slides.add_slide(blank_layout)
+    set_slide_background(slide1)
+    
+    # Title Box
+    tb = slide1.shapes.add_textbox(Inches(1.0), Inches(2.2), Inches(11.333), Inches(3.0))
+    tf = tb.text_frame
+    tf.word_wrap = True
+    
+    p0 = tf.paragraphs[0]
+    p0.text = "FINCH EXECUTIVE REPORT"
+    p0.font.size = Pt(14)
+    p0.font.bold = True
+    p0.font.color.rgb = COLOR_GOLD
+    
+    p1 = tf.add_paragraph()
+    p1.text = f"Business Intelligence Audit: {filename}"
+    p1.font.size = Pt(36)
+    p1.font.bold = True
+    p1.font.color.rgb = COLOR_TEXT_MAIN
+    
+    p2 = tf.add_paragraph()
+    p2.text = "Automated financial health audit, growth scenarios, and recommendations."
+    p2.font.size = Pt(16)
+    p2.font.color.rgb = COLOR_TEXT_MUTED
+
+    # ------------------------------------------------------------- SLIDE 2: Executive Summary & KPIs
+    slide2 = prs.slides.add_slide(blank_layout)
+    set_slide_background(slide2)
+    add_header(slide2, "Executive Financial Summary")
+    
+    rev_str = f"{currency}{totals.get('total_revenue', 0):,.2f}"
+    cost_str = f"{currency}{totals.get('total_costs', 0):,.2f}" if cost_known else "N/A"
+    profit_str = f"{currency}{totals.get('net_profit', 0):,.2f}" if cost_known else "N/A"
+    margin_str = f"{totals.get('profit_margin', 0):.1f}%" if cost_known and totals.get("profit_margin") is not None else "N/A"
+
+    add_kpi_card(slide2, Inches(0.8), Inches(1.8), Inches(2.7), Inches(1.5), "Total Revenue", rev_str)
+    add_kpi_card(slide2, Inches(3.8), Inches(1.8), Inches(2.7), Inches(1.5), "Total Costs", cost_str)
+    add_kpi_card(slide2, Inches(6.8), Inches(1.8), Inches(2.7), Inches(1.5), "Net Profit", profit_str)
+    add_kpi_card(slide2, Inches(9.8), Inches(1.8), Inches(2.7), Inches(1.5), "Profit Margin", margin_str)
+
+    # Key Verdict Card
+    verdict_card = slide2.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, Inches(0.8), Inches(3.7), Inches(11.7), Inches(2.8))
+    verdict_card.fill.solid()
+    verdict_card.fill.fore_color.rgb = COLOR_CARD
+    verdict_card.line.color.rgb = COLOR_TEAL
+    
+    v_tf = verdict_card.text_frame
+    v_tf.margin_left = Inches(0.3)
+    v_tf.margin_top = Inches(0.3)
+    
+    vp0 = v_tf.paragraphs[0]
+    vp0.text = "FINCH AUDIT VERDICT & KEY OBSERVATIONS"
+    vp0.font.size = Pt(12)
+    vp0.font.bold = True
+    vp0.font.color.rgb = COLOR_GOLD
+
+    obs = facts.get("metadata", {})
+    p_text = f"• Total dataset rows analyzed: {obs.get('total_rows', 0):,}\n"
+    p_text += f"• Data health index score: {obs.get('data_health_index', 100)}%\n"
+    if cost_known:
+        p_text += f"• Overall business operation is running with a net margin of {margin_str}.\n"
+    else:
+        p_text += "• Revenue tracked accurately. Cost analysis currently pending cost column assignment."
+
+    vp1 = v_tf.add_paragraph()
+    vp1.text = p_text
+    vp1.font.size = Pt(14)
+    vp1.font.color.rgb = COLOR_TEXT_MAIN
+
+    # ------------------------------------------------------------- SLIDE 3: Visual Financial Chart Embed
+    slide3 = prs.slides.add_slide(blank_layout)
+    set_slide_background(slide3)
+    add_header(slide3, "Financial Overview & Cost Structure")
+
+    chart1_path = generate_chart_image(facts, "financial_overview", currency)
+    if chart1_path and os.path.exists(chart1_path):
+        slide3.shapes.add_picture(chart1_path, Inches(0.8), Inches(1.8), Inches(6.5), Inches(4.5))
+        os.remove(chart1_path)
+
+    # Narrative callout beside chart
+    tb_chart = slide3.shapes.add_textbox(Inches(7.6), Inches(1.8), Inches(4.9), Inches(4.5))
+    tf_chart = tb_chart.text_frame
+    tf_chart.word_wrap = True
+    
+    cp0 = tf_chart.paragraphs[0]
+    cp0.text = "Key Takeaways:"
+    cp0.font.size = Pt(16)
+    cp0.font.bold = True
+    cp0.font.color.rgb = COLOR_GOLD
+
+    cp1 = tf_chart.add_paragraph()
+    cp1.text = "• Visual chart illustrates total top-line revenue vs bottom-line net operational profitability."
+    cp1.font.size = Pt(14)
+    cp1.font.color.rgb = COLOR_TEXT_MAIN
+
+    # ------------------------------------------------------------- SLIDE 4: Category Breakdown Chart
+    slide4 = prs.slides.add_slide(blank_layout)
+    set_slide_background(slide4)
+    add_header(slide4, "Top Revenue Categories & Concentration")
+
+    chart2_path = generate_chart_image(facts, "category_distribution", currency)
+    if chart2_path and os.path.exists(chart2_path):
+        slide4.shapes.add_picture(chart2_path, Inches(0.8), Inches(1.8), Inches(6.5), Inches(4.5))
+        os.remove(chart2_path)
+    else:
+        tb_nocat = slide4.shapes.add_textbox(Inches(0.8), Inches(2.0), Inches(6.5), Inches(3.0))
+        tb_nocat.text_frame.text = "No category mapping selected for breakdown chart."
+
+    # Concentration Analysis Card
+    add_kpi_card(slide4, Inches(7.6), Inches(1.8), Inches(4.9), Inches(4.5), 
+                 "Revenue Concentration", "Category Audit", "Evaluate dependencies on top-performing product/service categories.")
+
+    # ------------------------------------------------------------- SLIDE 5: Data Reliability & Quality Audit
+    slide5 = prs.slides.add_slide(blank_layout)
+    set_slide_background(slide5)
+    add_header(slide5, "Data Health & Outlier Quality Check")
+
+    meta = facts.get("metadata", {})
+    add_kpi_card(slide5, Inches(0.8), Inches(1.8), Inches(3.6), Inches(1.6), "Health Score", f"{meta.get('data_health_index', 100)}%")
+    add_kpi_card(slide5, Inches(4.8), Inches(1.8), Inches(3.6), Inches(1.6), "Missing Cells", f"{meta.get('missing_cells', 0):,}")
+    add_kpi_card(slide5, Inches(8.8), Inches(1.8), Inches(3.6), Inches(1.6), "Duplicate Rows", f"{meta.get('duplicate_rows', 0):,}")
+
+    anom_card = slide5.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, Inches(0.8), Inches(3.8), Inches(11.6), Inches(2.8))
+    anom_card.fill.solid()
+    anom_card.fill.fore_color.rgb = COLOR_CARD
+    anom_card.line.color.rgb = COLOR_TEAL
+
+    atf = anom_card.text_frame
+    atf.margin_left = Inches(0.3)
+    atf.margin_top = Inches(0.3)
+    
+    ap0 = atf.paragraphs[0]
+    ap0.text = "ANOMALY & OUTLIER DETECTION"
+    ap0.font.size = Pt(12)
+    ap0.font.bold = True
+    ap0.font.color.rgb = COLOR_GOLD
+
+    anomalies = facts.get("anomalies", [])
+    if anomalies:
+        ap1 = atf.add_paragraph()
+        ap1.text = f"Detected {len(anomalies)} statistical anomalies in transaction values. Verify large transactions for potential data entry errors or concentrated revenue spikes."
+        ap1.font.size = Pt(14)
+        ap1.font.color.rgb = COLOR_TEXT_MAIN
+    else:
+        ap1 = atf.add_paragraph()
+        ap1.text = "No statistical anomalies detected. Data distribution remains within expected bounds."
+        ap1.font.size = Pt(14)
+        ap1.font.color.rgb = COLOR_TEXT_MAIN
+
+    # ------------------------------------------------------------- SLIDE 6: What-If Scenarios Diagram
+    slide6 = prs.slides.add_slide(blank_layout)
+    set_slide_background(slide6)
+    add_header(slide6, "What-If Growth & Sensitivity Scenarios")
+
+    if scenarios and len(scenarios) > 0:
+        left_pos = 0.8
+        for i, sc in enumerate(scenarios[:3]):
+            sc_card = slide6.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, Inches(left_pos), Inches(1.8), Inches(3.6), Inches(4.5))
+            sc_card.fill.solid()
+            sc_card.fill.fore_color.rgb = COLOR_CARD
+            sc_card.line.color.rgb = COLOR_GOLD
+            
+            stf = sc_card.text_frame
+            stf.margin_left = Inches(0.2)
+            stf.margin_top = Inches(0.2)
+            
+            sp0 = stf.paragraphs[0]
+            sp0.text = sc.get("scenario_name", f"Scenario {i+1}").upper()
+            sp0.font.size = Pt(14)
+            sp0.font.bold = True
+            sp0.font.color.rgb = COLOR_GOLD
+            
+            sp1 = stf.add_paragraph()
+            sp1.text = f"\nSimulated Rev: {currency}{sc.get('revenue', 0):,.2f}\nSimulated Costs: {currency}{sc.get('costs', 0):,.2f}\nSimulated Profit: {currency}{sc.get('net_profit', 0):,.2f}\nMargin: {sc.get('margin', 0):.1f}%"
+            sp1.font.size = Pt(12)
+            sp1.font.color.rgb = COLOR_TEXT_MAIN
+            
+            left_pos += 4.0
+    else:
+        no_sc = slide6.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, Inches(0.8), Inches(1.8), Inches(11.6), Inches(4.5))
+        no_sc.fill.solid()
+        no_sc.fill.fore_color.rgb = COLOR_CARD
+        no_sc.line.color.rgb = COLOR_TEAL
         
-        p2 = tf.add_paragraph()
-        p2.text = subtitle_text
-        p2.font.size = Pt(14)
-        p2.font.color.rgb = RGBColor(100, 116, 139)
+        nstf = no_sc.text_frame
+        p = nstf.paragraphs[0]
+        p.text = "No saved scenario models present for diagram comparison. Model price & volume adjustments in the What-If tab."
+        p.font.size = Pt(14)
+        p.font.color.rgb = COLOR_TEXT_MUTED
 
-    def add_footer(slide, slide_num):
-        tb = slide.shapes.add_textbox(Inches(0.8), Inches(7.0), Inches(11.7), Inches(0.3))
-        tf = tb.text_frame
-        p = tf.paragraphs[0]
-        p.text = f"FINCH Business Intelligence | Source: {filename} | Slide {slide_num} of 8"
-        p.font.size = Pt(10)
-        p.font.color.rgb = RGBColor(148, 163, 184)
+    # ------------------------------------------------------------- SLIDE 7: Strategic Recommendations
+    slide7 = prs.slides.add_slide(blank_layout)
+    set_slide_background(slide7)
+    add_header(slide7, "FINCH Strategic Action Plan")
 
-    # --- Slide 1: Title Slide ---
-    slide1 = prs.slides.add_slide(layout)
-    tb1 = slide1.shapes.add_textbox(Inches(1), Inches(2.2), Inches(11.3), Inches(3))
-    tf1 = tb1.text_frame
-    tf1.word_wrap = True
-    p = tf1.paragraphs[0]
-    p.text = "FINCH Financial Intelligence Brief"
-    p.font.size = Pt(40)
-    p.font.bold = True
-    p.font.color.rgb = RGBColor(15, 23, 42)
-    
-    p2 = tf1.add_paragraph()
-    p2.text = f"Prepared for SME Audit & Executive Review\nFile: {filename} | Currency: {currency}"
-    p2.font.size = Pt(18)
-    p2.font.color.rgb = RGBColor(100, 116, 139)
-    add_footer(slide1, 1)
+    rec_card = slide7.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, Inches(0.8), Inches(1.8), Inches(11.6), Inches(4.8))
+    rec_card.fill.solid()
+    rec_card.fill.fore_color.rgb = COLOR_CARD
+    rec_card.line.color.rgb = COLOR_TEAL
 
-    # --- Slide 2: Executive Summary ---
-    slide2 = prs.slides.add_slide(layout)
-    add_header(slide2, "1. Executive Summary", "High-level financial health overview of your business records.")
-    tb2 = slide2.shapes.add_textbox(Inches(0.8), Inches(2.0), Inches(11.7), Inches(4.5))
-    tf2 = tb2.text_frame
-    tf2.word_wrap = True
-    
-    bullets = [
-        f"Total Verified Revenue: {currency}{rev:,.2f}",
-        f"Total Recorded Costs: {currency}{costs:,.2f}" if cost_known and costs is not None else "Total Recorded Costs: Not provided in dataset",
-        f"Net Profitability: {currency}{profit:,.2f} ({margin:.1f}% margin)" if cost_known and profit is not None else "Net Profitability: n/a (Requires cost column)",
-        f"Data Reliability Index: {meta.get('data_health_index', 100)}% (Based on missing cells & duplicates)"
-    ]
-    for b in bullets:
-        p = tf2.add_paragraph()
-        p.text = f"• {b}"
-        p.font.size = Pt(18)
-        p.font.color.rgb = RGBColor(30, 41, 59)
-        p.space_after = Pt(14)
-    add_footer(slide2, 2)
+    rtf = rec_card.text_frame
+    rtf.margin_left = Inches(0.4)
+    rtf.margin_top = Inches(0.4)
 
-    # --- Slide 3: Revenue & Profitability Breakdown ---
-    slide3 = prs.slides.add_slide(layout)
-    add_header(slide3, "2. Revenue & Profitability Breakdown", "Core financial margins and earnings analysis.")
-    tb3 = slide3.shapes.add_textbox(Inches(0.8), Inches(2.0), Inches(11.7), Inches(4.5))
-    tf3 = tb3.text_frame
-    tf3.word_wrap = True
-    p = tf3.paragraphs[0]
-    p.text = f"Your business generated {currency}{rev:,.2f} across {meta.get('total_records', 0):,} transaction rows."
-    p.font.size = Pt(18)
-    p.font.color.rgb = RGBColor(30, 41, 59)
-    p.space_after = Pt(14)
-    
-    p2 = tf3.add_paragraph()
-    if cost_known and profit is not None:
-        if profit > 0:
-            p2.text = f"The business operated at a net profit of {currency}{profit:,.2f}, representing a healthy {margin:.1f}% return on revenue."
-        else:
-            p2.text = f"Warning: The business incurred a net loss of {currency}{abs(profit):,.2f}. Immediate cost rationalization is recommended."
-    else:
-        p2.text = "Cost metrics were not explicitly mapped. Establishing a baseline cost ratio is recommended for accurate forecasting."
-    p2.font.size = Pt(16)
-    p2.font.color.rgb = RGBColor(71, 85, 105)
-    add_footer(slide3, 3)
+    rp0 = rtf.paragraphs[0]
+    rp0.text = "RECOMMENDED ACTION ITEMS"
+    rp0.font.size = Pt(14)
+    rp0.font.bold = True
+    rp0.font.color.rgb = COLOR_GOLD
 
-    # --- Slide 4: Category Leaderboards (FIXED HERE) ---
-    slide4 = prs.slides.add_slide(layout)
-    add_header(slide4, "3. Top Performing Categories", "Revenue distribution across product lines and categories.")
-    tb4 = slide4.shapes.add_textbox(Inches(0.8), Inches(2.0), Inches(11.7), Inches(4.5))
-    tf4 = tb4.text_frame
-    tf4.word_wrap = True
-    
-    if rbc:
-        p = tf4.paragraphs[0]
-        p.text = "Top Revenue Drivers:"
-        p.font.size = Pt(18)
-        p.font.bold = True
-        for cat, val in list(rbc.items())[:5]:
-            p_item = tf4.add_paragraph()
-            try:
-                num_val = float(val)
-                p_item.text = f"• {cat}: {currency}{num_val:,.2f}"
-            except (ValueError, TypeError):
-                p_item.text = f"• {cat}: {val}"
-            p_item.font.size = Pt(16)
-            p_item.font.color.rgb = RGBColor(51, 65, 85)
-            p_item.space_after = Pt(8)
-    else:
-        p = tf4.paragraphs[0]
-        p.text = "No category column was mapped for leaderboard analysis."
-        p.font.size = Pt(16)
-    add_footer(slide4, 4)
+    rp1 = rtf.add_paragraph()
+    rp1.text = "1. Margin Optimization: Audit high-cost lines and optimize variable per-unit expenses.\n" \
+               "2. Category Focus: Scale investment into top-performing revenue categories.\n" \
+               "3. Anomaly Resolution: Verify outliers to maintain data integrity across accounting records.\n" \
+               "4. Scenario Execution: Implement price/volume sensitivity targets for upcoming quarter."
+    rp1.font.size = Pt(14)
+    rp1.font.color.rgb = COLOR_TEXT_MAIN
 
-    # --- Slide 5: Concentration Risk ---
-    slide5 = prs.slides.add_slide(layout)
-    add_header(slide5, "4. Revenue Concentration Risk", "Evaluating reliance on top revenue streams.")
-    tb5 = slide5.shapes.add_textbox(Inches(0.8), Inches(2.0), Inches(11.7), Inches(4.5))
-    tf5 = tb5.text_frame
-    tf5.word_wrap = True
-    p = tf5.paragraphs[0]
-    p.text = f"Concentration Analysis: {concentration.get('share', 'Moderate')}"
-    p.font.size = Pt(20)
-    p.font.bold = True
-    p.font.color.rgb = RGBColor(15, 23, 42)
-    p.space_after = Pt(14)
-    
-    p2 = tf5.add_paragraph()
-    p2.text = f"Top Category: {concentration.get('top_category', 'N/A')}\nDiversification is key to mitigating supply chain and customer demand shocks."
-    p2.font.size = Pt(16)
-    p2.font.color.rgb = RGBColor(71, 85, 105)
-    add_footer(slide5, 5)
+    # ------------------------------------------------------------- SLIDE 8: Closing Slide
+    slide8 = prs.slides.add_slide(blank_layout)
+    set_slide_background(slide8)
 
-    # --- Slide 6: Data Integrity & Reliability ---
-    slide6 = prs.slides.add_slide(layout)
-    add_header(slide6, "5. Record-Keeping & Data Health", "Auditability score of uploaded records.")
-    tb6 = slide6.shapes.add_textbox(Inches(0.8), Inches(2.0), Inches(11.7), Inches(4.5))
-    tf6 = tb6.text_frame
-    tf6.word_wrap = True
-    p = tf6.paragraphs[0]
-    p.text = f"Data Health Index: {meta.get('data_health_index', 100)} / 100"
-    p.font.size = Pt(20)
-    p.font.bold = True
-    p.space_after = Pt(14)
-    
-    p2 = tf6.add_paragraph()
-    p2.text = f"• Missing Cells: {meta.get('missing_cells', 0):,}\n• Duplicate Rows: {meta.get('duplicate_rows', 0):,}\n• Statistical Outliers Detected: {meta.get('anomaly_count', 0)}"
-    p2.font.size = Pt(16)
-    p2.font.color.rgb = RGBColor(71, 85, 105)
-    add_footer(slide6, 6)
-
-    # --- Slide 7: Key Risks & Warnings ---
-    slide7 = prs.slides.add_slide(layout)
-    add_header(slide7, "6. Key Risks & Warnings", "Identified operational risks from dataset audit.")
-    tb7 = slide7.shapes.add_textbox(Inches(0.8), Inches(2.0), Inches(11.7), Inches(4.5))
-    tf7 = tb7.text_frame
-    tf7.word_wrap = True
-    if warnings:
-        p = tf7.paragraphs[0]
-        p.text = "Identified Warnings:"
-        p.font.size = Pt(18)
-        p.font.bold = True
-        for w in warnings:
-            pw = tf7.add_paragraph()
-            pw.text = f"• {w}"
-            pw.font.size = Pt(15)
-            pw.font.color.rgb = RGBColor(185, 28, 28)
-            pw.space_after = Pt(8)
-    else:
-        p = tf7.paragraphs[0]
-        p.text = "No critical data warnings identified in this audit."
-        p.font.size = Pt(16)
-    add_footer(slide7, 7)
-
-    # --- Slide 8: 30 / 60 / 90-Day Action Plan ---
-    slide8 = prs.slides.add_slide(layout)
-    add_header(slide8, "7. Recommended Action Plan", "Strategic milestones for the next quarter.")
-    tb8 = slide8.shapes.add_textbox(Inches(0.8), Inches(2.0), Inches(11.7), Inches(4.5))
+    tb8 = slide8.shapes.add_textbox(Inches(1.0), Inches(2.5), Inches(11.333), Inches(2.5))
     tf8 = tb8.text_frame
-    tf8.word_wrap = True
-    p = tf8.paragraphs[0]
-    p.text = "• Next 30 Days: Reconcile missing cost records and verify inventory counts.\n• Next 60 Days: Focus marketing efforts on top-performing product categories.\n• Next 90 Days: Implement monthly scenario forecasting to protect net margins."
-    p.font.size = Pt(16)
-    p.font.color.rgb = RGBColor(30, 41, 59)
-    add_footer(slide8, 8)
+    
+    p8_0 = tf8.paragraphs[0]
+    p8_0.alignment = PP_ALIGN.CENTER
+    p8_0.text = "FINCH"
+    p8_0.font.size = Pt(48)
+    p8_0.font.bold = True
+    p8_0.font.color.rgb = COLOR_TEAL
 
-    out = io.BytesIO()
-    prs.save(out)
-    return out.getvalue()
+    p8_1 = tf8.add_paragraph()
+    p8_1.alignment = PP_ALIGN.CENTER
+    p8_1.text = "Secure Business Intelligence Workspace"
+    p8_1.font.size = Pt(16)
+    p8_1.font.color.rgb = COLOR_TEXT_MUTED
+
+    # Output to Byte Buffer
+    bio = io.BytesIO()
+    prs.save(bio)
+    bio.seek(0)
+    return bio.getvalue()
