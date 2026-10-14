@@ -1,7 +1,5 @@
 """
 FINCH - AI Business Intelligence Frontend (App1.py)
-Integrated with persistent URL sessions, top-sidebar auth/admin controls, 
-dataset-scoped scenarios, and reliable PowerPoint pitch downloads.
 """
 
 import base64
@@ -10,7 +8,6 @@ import hmac
 import io
 import os
 import re
-import duckdb
 
 import pandas as pd
 import plotly.express as px
@@ -32,7 +29,7 @@ APP_VERSION = "2.11"
 st.set_page_config(page_title="FINCH | AI Business Intelligence", page_icon="🐦",
                    layout="wide", initial_sidebar_state="expanded")
 
-# --- RESTORE SESSION FROM URL QUERY PARAMS (REFRESH RESILIENCE) ---
+# --- RESTORE SESSION FROM URL QUERY PARAMS ---
 if not st.session_state.get("user") and "finch_user" in st.query_params:
     st.session_state["user"] = st.query_params["finch_user"]
 
@@ -50,7 +47,7 @@ def get_base64_svg(svg_path: str = "finch_bird.svg") -> str:
 
 B64_LOGO = get_base64_svg()
 
-# --- SIGNATURE DARK GLASSMORPHISM & SHIMMERING TYPOGRAPHY STYLING ---
+# --- SIGNATURE STYLING ---
 st.markdown(f"""
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
@@ -80,11 +77,6 @@ st.markdown(f"""
     }}
     @keyframes finch-shine {{ to {{ background-position: 200% center; }} }}
 
-    .saas-card {{ 
-        background: linear-gradient(135deg, rgba(30, 41, 59, 0.65) 0%, rgba(15, 23, 42, 0.85) 100%); 
-        border: 1px solid rgba(51, 65, 85, 0.5); backdrop-filter: blur(16px);
-        padding: 28px; border-radius: 18px; box-shadow: 0 12px 32px -4px rgba(0, 0, 0, 0.6); margin-bottom: 24px; 
-    }}
     div[data-testid="stMetric"] {{
         background: linear-gradient(145deg, #162032, #101726);
         border: 1px solid rgba(71, 85, 105, 0.4); padding: 20px; border-radius: 16px;
@@ -238,7 +230,7 @@ if not st.session_state.get("user"):
 USER = st.session_state["user"]
 USER_EMAIL = get_user_email(USER)
 
-# --- SIDEBAR BRANDING & ALWAYS-AVAILABLE AUTH CONTROLS (PHASE 1) ---
+# --- SIDEBAR BRANDING & AUTH CONTROLS ---
 sidebar_logo_html = f"""
 <div style="display:flex; align-items:center; gap:12px; margin-bottom:12px;">
     {"<img src='data:image/svg+xml;base64," + B64_LOGO + "' style='width:30px; height:auto;'/>" if B64_LOGO else "🐦"}
@@ -254,7 +246,6 @@ if st.sidebar.button("🔒 Log out", key="sidebar_logout"):
         del st.session_state[k]
     st.rerun()
 
-# --- FAIL-CLOSED ADMIN PANEL CHECK ---
 is_admin = (ADMIN_EMAILS and USER_EMAIL in ADMIN_EMAILS)
 if is_admin:
     with st.sidebar.expander("🛠️ Founder Admin Panel"):
@@ -546,7 +537,6 @@ with tabs[4]:
                 except Exception as e:
                     st.error(f"Error generating presentation: {e}")
         
-        # PERSISTENT DOWNLOAD BUTTON FIX
         if st.session_state.get("deck_bytes"):
             st.download_button(
                 "📥 Download Business Report (.pptx)",

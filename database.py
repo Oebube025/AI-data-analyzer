@@ -1,6 +1,6 @@
 """
 database.py - FINCH Persistence Layer
-Supports PostgreSQL (Supabase/Neon) with graceful fallback to DuckDB.
+Fixed parameter binding for DuckDB & PostgreSQL.
 """
 
 import os
@@ -128,7 +128,7 @@ def create_user(username: str, email: str, password_hash: str) -> bool:
             cur.close()
         else:
             conn.execute("INSERT INTO tenants VALUES (?, ?, ?, ?, ?, 0)",
-                         (email.strip().lower(), username.strip().lower(), password_hash, now, now))
+                         [email.strip().lower(), username.strip().lower(), password_hash, now, now])
         conn.close()
         return True
     except Exception:
@@ -151,42 +151,44 @@ def verify_user(identifier: str, password_hash: str):
         return row[0] if row else None
     else:
         res = conn.execute("SELECT username FROM tenants WHERE (email = ? OR username = ?) AND password_hash = ?",
-                           (ident, ident, password_hash)).fetchone()
+                           [ident, ident, password_hash]).fetchone()
         if res:
-            conn.execute("UPDATE tenants SET last_active = ? WHERE email = ? OR username = ?", (datetime.now(), ident, ident))
+            conn.execute("UPDATE tenants SET last_active = ? WHERE email = ? OR username = ?", [datetime.now(), ident, ident])
         conn.close()
         return res[0] if res else None
 
 def get_user_email(username: str) -> str:
     conn = get_connection()
+    u_clean = username.lower().strip()
     if DATABASE_URL:
         cur = conn.cursor()
-        cur.execute("SELECT email FROM tenants WHERE username = %s OR email = %s", (username.lower(), username.lower()))
+        cur.execute("SELECT email FROM tenants WHERE username = %s OR email = %s", (u_clean, u_clean))
         row = cur.fetchone()
         cur.close()
         conn.close()
-        return row[0] if row else username
+        return row[0] if row else u_clean
     else:
-        res = conn.execute("SELECT email FROM tenants WHERE username = ? OR email = ?", (username.lower(), username.lower())).fetchone()
+        res = conn.execute("SELECT email FROM tenants WHERE username = ? OR email = ?", [u_clean, u_clean]).fetchone()
         conn.close()
-        return res[0] if res else username
+        return res[0] if res else u_clean
 
 def log_tenant_activity(email: str, activity_desc: str, increment_upload: bool = False):
     conn = get_connection()
     now = datetime.now()
+    e_clean = email.lower().strip()
     if DATABASE_URL:
         cur = conn.cursor()
         if increment_upload:
-            cur.execute("UPDATE tenants SET last_active = %s, total_uploads = total_uploads + 1 WHERE email = %s", (now, email.lower()))
+            cur.execute("UPDATE tenants SET last_active = %s, total_uploads = total_uploads + 1 WHERE email = %s", (now, e_clean))
         else:
-            cur.execute("UPDATE tenants SET last_active = %s WHERE email = %s", (now, email.lower()))
+            cur.execute("UPDATE tenants SET last_active = %s WHERE email = %s", (now, e_clean))
         conn.commit()
         cur.close()
     else:
         if increment_upload:
-            conn.execute("UPDATE tenants SET last_active = ?, total_uploads = total_uploads + 1 WHERE email = ?", (now, email.lower()))
+            conn.execute("UPDATE tenants SET last_active = ?, total_uploads = total_uploads + 1 WHERE email = ?", [now, e_clean])
         else:
-            conn.execute("UPDATE tenants SET last_active = ?, WHERE email = ?", (now, email.lower()))
+            conn.execute("UPDATE tenants SET last_active = ? WHERE email = ?", [now, e_clean])
     conn.close()
 
 def save_scenario_db(username: str, scenario_name: str, data_key: str, res: dict):
@@ -200,7 +202,7 @@ def save_scenario_db(username: str, scenario_name: str, data_key: str, res: dict
         cur.close()
     else:
         conn.execute("INSERT INTO scenarios (username, scenario_name, data_key, revenue, costs, net_profit, margin, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                     (username, scenario_name, data_key, res["revenue"], res["costs"], res["net_profit"], res["profit_margin"], now))
+                     [username, scenario_name, data_key, res["revenue"], res["costs"], res["net_profit"], res["profit_margin"], now])
     conn.close()
 
 def load_scenarios_db(username: str, data_key: str):
@@ -213,7 +215,7 @@ def load_scenarios_db(username: str, data_key: str):
         conn.close()
         return [{"scenario_name": r[0], "revenue": r[1], "costs": r[2], "net_profit": r[3], "margin": r[4], "timestamp": r[5]} for r in rows]
     else:
-        res = conn.execute("SELECT scenario_name, revenue, costs, net_profit, margin, timestamp FROM scenarios WHERE username = ? AND data_key = ? ORDER BY timestamp DESC", (username, data_key)).fetchall()
+        res = conn.execute("SELECT scenario_name, revenue, costs, net_profit, margin, timestamp FROM scenarios WHERE username = ? AND data_key = ? ORDER BY timestamp DESC", [username, data_key]).fetchall()
         conn.close()
         return [{"scenario_name": r[0], "revenue": r[1], "costs": r[2], "net_profit": r[3], "margin": r[4], "timestamp": r[5]} for r in res]
 
@@ -225,7 +227,7 @@ def delete_scenarios_db(username: str, data_key: str):
         conn.commit()
         cur.close()
     else:
-        conn.execute("DELETE FROM scenarios WHERE username = ? AND data_key = ?", (username, data_key))
+        conn.execute("DELETE FROM scenarios WHERE username = ? AND data_key = ?", [username, data_key])
     conn.close()
 
 def save_audit_history_db(email: str, company_type: str, file_name: str, totals: dict, ai_brief: str):
@@ -239,20 +241,21 @@ def save_audit_history_db(email: str, company_type: str, file_name: str, totals:
         cur.close()
     else:
         conn.execute("INSERT INTO audit_history (email, company_type, file_name, total_revenue, net_profit, profit_margin, ai_brief, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                     (email, company_type, file_name, totals.get("total_revenue", 0), totals.get("net_profit", 0), totals.get("profit_margin", 0), ai_brief, now))
+                     [email, company_type, file_name, totals.get("total_revenue", 0), totals.get("net_profit", 0), totals.get("profit_margin", 0), ai_brief, now])
     conn.close()
 
 def load_user_history_db(email: str):
     conn = get_connection()
+    e_clean = email.lower().strip()
     if DATABASE_URL:
         cur = conn.cursor()
-        cur.execute("SELECT file_name, total_revenue, net_profit, profit_margin, ai_brief, timestamp FROM audit_history WHERE email = %s ORDER BY timestamp DESC", (email,))
+        cur.execute("SELECT file_name, total_revenue, net_profit, profit_margin, ai_brief, timestamp FROM audit_history WHERE email = %s ORDER BY timestamp DESC", (e_clean,))
         rows = cur.fetchall()
         cur.close()
         conn.close()
         return [{"file_name": r[0], "total_revenue": r[1], "net_profit": r[2], "profit_margin": r[3], "ai_brief": r[4], "timestamp": r[5]} for r in rows]
     else:
-        res = conn.execute("SELECT file_name, total_revenue, net_profit, profit_margin, ai_brief, timestamp FROM audit_history WHERE email = ? ORDER BY timestamp DESC", (email,)).fetchall()
+        res = conn.execute("SELECT file_name, total_revenue, net_profit, profit_margin, ai_brief, timestamp FROM audit_history WHERE email = ? ORDER BY timestamp DESC", [e_clean]).fetchall()
         conn.close()
         return [{"file_name": r[0], "total_revenue": r[1], "net_profit": r[2], "profit_margin": r[3], "ai_brief": r[4], "timestamp": r[5]} for r in res]
 
@@ -265,5 +268,5 @@ def save_feedback_db(email: str, category: str, message: str):
         conn.commit()
         cur.close()
     else:
-        conn.execute("INSERT INTO feedback (email, category, message, timestamp) VALUES (?, ?, ?, ?, ?)", (email, category, message, now))
+        conn.execute("INSERT INTO feedback (email, category, message, timestamp) VALUES (?, ?, ?, ?)", [email, category, message, now])
     conn.close()
