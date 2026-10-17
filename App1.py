@@ -1,6 +1,6 @@
 """
 FINCH - AI Business Intelligence Frontend (App1.py)
-Phase 3 Production-Ready Release with Privacy Masking, Beta Badges, and Terms.
+Phase 3 Production-Ready Release with Privacy Masking and Terms.
 """
 
 import base64
@@ -44,53 +44,33 @@ def get_base64_svg(svg_path: str = "finch_bird.svg") -> str:
 
 B64_LOGO = get_base64_svg()
 
-st.markdown(f"""
+st.markdown("""
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
-    .stApp {{ background-color: #0b0f19; color: #f1f5f9; font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; }}
-    section[data-testid="stSidebar"] {{ background-color: #050811; border-right: 1px solid rgba(30, 41, 59, 0.6); }}
+    .stApp { background-color: #0b0f19; color: #f1f5f9; font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; }
+    section[data-testid="stSidebar"] { background-color: #050811; border-right: 1px solid rgba(30, 41, 59, 0.6); }
 
-    .floating-finch-badge {{
-        position: fixed; top: 18px; right: 24px; z-index: 99999;
-        display: flex; align-items: center; gap: 8px;
-        background: rgba(15, 23, 42, 0.75); border: 1px solid rgba(30, 41, 59, 0.8);
-        backdrop-filter: blur(12px); padding: 6px 14px; border-radius: 999px;
-        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5), inset 0 1px 1px rgba(255,255,255,0.1);
-        pointer-events: none;
-    }}
-    .floating-finch-badge img {{ width: 22px; height: auto; }}
-    .floating-finch-badge span {{
-        font-family: 'Space Grotesk', sans-serif; font-weight: 700; font-size: 0.85rem; letter-spacing: 0.15em;
-        background: linear-gradient(110deg,#0f9d8f 0%,#5eead4 50%,#f4b860 100%);
-        -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
-    }}
-
-    .finch-gradient-heading {{
+    .finch-gradient-heading {
         font-family: 'Space Grotesk', sans-serif; font-weight: 700; letter-spacing: -0.01em;
         background: linear-gradient(110deg, #0f9d8f 0%, #5eead4 30%, #f4b860 60%, #5eead4 80%, #0f9d8f 100%);
         background-size: 200% auto; -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
         animation: finch-shine 8s linear infinite; display: inline-block;
-    }}
-    @keyframes finch-shine {{ to {{ background-position: 200% center; }} }}
+    }
+    @keyframes finch-shine { to { background-position: 200% center; } }
 
-    div[data-testid="stMetric"] {{
+    div[data-testid="stMetric"] {
         background: linear-gradient(145deg, #162032, #101726);
         border: 1px solid rgba(71, 85, 105, 0.4); padding: 20px; border-radius: 16px;
         box-shadow: inset 0 2px 4px rgba(255, 255, 255, 0.05), 0 12px 28px rgba(0, 0, 0, 0.5);
-    }}
-    div[data-testid="stMetric"] label {{ color: #94a3b8 !important; font-weight: 500; font-size: 0.85rem !important; text-transform: uppercase; }}
-    div[data-testid="stMetric"] [data-testid="stMetricValue"] {{ color: #f8fafc !important; font-weight: 700; }}
-    .stButton>button {{ 
+    }
+    div[data-testid="stMetric"] label { color: #94a3b8 !important; font-weight: 500; font-size: 0.85rem !important; text-transform: uppercase; }
+    div[data-testid="stMetric"] [data-testid="stMetricValue"] { color: #f8fafc !important; font-weight: 700; }
+    .stButton>button { 
         background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: white; border: none; border-radius: 12px; 
         font-weight: 600; padding: 0.6rem 1.2rem; width: 100%; box-shadow: inset 0 2px 4px rgba(255, 255, 255, 0.2), 0 6px 16px rgba(16, 185, 129, 0.4);
-    }}
-    .stButton>button:hover {{ background: linear-gradient(135deg, #059669 100%, #047857 100%); transform: translateY(-1px); }}
+    }
+    .stButton>button:hover { background: linear-gradient(135deg, #059669 100%, #047857 100%); transform: translateY(-1px); }
 </style>
-
-<div class="floating-finch-badge">
-    {"<img src='data:image/svg+xml;base64," + B64_LOGO + "' alt='FINCH'/>" if B64_LOGO else "🐦"}
-    <span>FINCH v2.11 [BETA]</span>
-</div>
 """, unsafe_allow_html=True)
 
 def get_required_secret(name: str) -> str:
@@ -250,9 +230,6 @@ if is_admin:
             st.info("Admin records loading...")
 
 st.sidebar.markdown("---")
-
-if not check_backend_status(BACKEND_URL, BACKEND_SECRET_KEY):
-    st.warning("⚠️ Backend API is waking up or offline. AI advisory may be offline.")
 
 uploaded = st.file_uploader("📁 Upload your sales or business records (.csv or .xlsx, max 10MB)", type=["csv", "xlsx"])
 
@@ -515,7 +492,6 @@ with tabs[4]:
         if st.button("Create PowerPoint Report (.pptx)", type="primary"):
             with st.spinner("📊 Building presentation..."):
                 try:
-                    # Format regional/category data for deck builder
                     rbc_data = [{"region": k, "revenue": v} for k, v in facts.get("revenue_by_category", {}).items()]
                     deck_bytes = create_executive_deck(
                         facts, currency=currency, filename=uploaded_name, scenarios=load_scenarios_db(USER, data_key))
